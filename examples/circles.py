@@ -3,8 +3,6 @@ from pydantic import BaseModel, Field
 import instructor
 import openai
 from dotenv import load_dotenv
-from lib import Predictor, Example, Base64Image, image_to_base64
-from optimizers import OptunaFewShot, GreedyFewShot
 from tqdm.asyncio import tqdm
 import random
 from typing import Literal, Optional
@@ -12,6 +10,9 @@ from PIL import Image, ImageDraw
 import io
 import matplotlib.pyplot as plt
 import base64
+
+from lib import Predictor, Example, Base64Image, image_to_base64
+from optimizers import OptunaFewShot, GreedyFewShot
 
 
 class ImageInput(BaseModel):
