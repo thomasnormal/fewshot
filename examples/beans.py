@@ -4,11 +4,12 @@ from pydantic import BaseModel, Field
 import instructor
 import openai
 from dotenv import load_dotenv
-from lib import Predictor, Example, Base64Image, image_to_base64
-from optimizers import OptunaFewShot
 from tqdm.asyncio import tqdm
 import random
 from typing import Literal, Optional
+
+from optimizers import OptunaFewShot
+from fewshot import Predictor, Example, Base64Image, image_to_base64
 
 
 # Mapping from numeric labels to string labels
@@ -54,7 +55,7 @@ async def main(client, max_examples: int):
             test_subset, max_concurrent=15
         ):
             score = float(answer.classification == actual_label)
-            #predictor.backwards(input_data, answer, score)
+            predictor.backwards(input_data, answer, score)
 
             correctness.append(score)
             pbar.set_postfix(accuracy=sum(correctness) / len(correctness))
@@ -63,13 +64,8 @@ async def main(client, max_examples: int):
     final_accuracy = sum(correctness) / len(correctness)
     print(f"Final accuracy: {final_accuracy:.2f}")
 
-    # predictor.inspect_history(n=1)
-
 
 if __name__ == "__main__":
     load_dotenv()
     client = instructor.from_openai(openai.AsyncOpenAI())
-
-    for max_examples in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]:
-        print(f"Training with {max_examples} examples")
-        asyncio.run(main(client, max_examples))
+    asyncio.run(main(client, max_examples=3))

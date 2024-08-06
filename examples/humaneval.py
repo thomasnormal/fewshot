@@ -1,5 +1,4 @@
 import argparse
-from lib import Predictor, Example
 from pydantic import BaseModel, field_validator, Field, ValidationError
 import asyncio
 import instructor, openai, dotenv
@@ -8,6 +7,8 @@ import datasets
 from tqdm.asyncio import tqdm
 from typing import Annotated
 import contextlib, io
+
+from fewshot import Predictor, Example
 
 
 def parse_arguments():
@@ -60,7 +61,9 @@ def evaluate(input: Question, output: Answer):
 async def run(pred, exs, examples=(), args=None):
     correctness = []
     with tqdm(total=len(exs)) as pbar:
-        async for (input, ex), answer in pred.as_completed((ex.input, ex) for ex in exs):
+        async for (input, ex), answer in pred.as_completed(
+            (ex.input, ex) for ex in exs
+        ):
             if isinstance(answer, ValidationError):
                 score = 0
             else:

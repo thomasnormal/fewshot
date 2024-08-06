@@ -15,8 +15,9 @@ from termcolor import colored
 import diskcache
 import base64
 from io import BytesIO
-
 from PIL import Image
+
+from optimizers import DummyOptimizer
 
 
 def image_to_base64(image):

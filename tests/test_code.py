@@ -3,10 +3,11 @@ import asyncio
 from pydantic import BaseModel, field_validator, Field, ValidationError
 import contextlib
 import io
-from lib import Predictor, Example
 import instructor
 import openai
 from dotenv import load_dotenv
+
+from fewshot import Predictor, Example
 
 
 # Fixtures and tests

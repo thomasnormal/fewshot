@@ -1,10 +1,12 @@
 from datasets import load_dataset
 from pydantic import Field, BaseModel
 import instructor, openai, dotenv
-from lib import Predictor, Example
 import asyncio
 from tqdm import tqdm
 from itertools import islice
+
+from fewshot import Predictor, Example
+from optimizers import OptunaFewShot
 
 
 class Question(BaseModel):
@@ -22,16 +24,20 @@ async def main():
     dataset = load_dataset("hotpot_qa", "fullwiki")
     trainset = [
         (Question(question=x["question"]), x["answer"])
-        for x in islice(dataset['train'], 100)
+        for x in islice(dataset["train"], 100)
     ]
 
     dotenv.load_dotenv()
     client = instructor.from_openai(openai.AsyncOpenAI())
-    pred = Predictor(client, "gpt-4o-mini", output_type=Answer, max_examples=5)
+    pred = Predictor(
+        client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3)
+    )
 
     correctness = []
     with tqdm(total=len(trainset)) as pbar:
-        async for (input, expected), answer in pred.as_completed(trainset, max_concurrent=10):
+        async for (input, expected), answer in pred.as_completed(
+            trainset, max_concurrent=10
+        ):
             score = int(answer.answer == expected)
             pred.backwards(input, answer, score)
 

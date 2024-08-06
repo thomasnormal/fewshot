@@ -5,19 +5,21 @@ from pydantic import Field, BaseModel
 import instructor
 import openai
 import dotenv
-from lib import Predictor, Example
 from itertools import islice
+
+from fewshot import Predictor, Example
 
 
 @pytest.fixture(scope="module")
 def client():
     dotenv.load_dotenv()
+    print("Using OpenAI API key:", openai.api_key)
     return instructor.from_openai(openai.AsyncOpenAI())
 
 
 @pytest.fixture(scope="module")
 def predictor(client):
-    return Predictor(client, "gpt-4o-mini", output_type=Answer, max_examples=3)
+    return Predictor(client, "gpt-4o-mini", output_type=Answer)
 
 
 class Question(BaseModel):
@@ -52,10 +54,7 @@ async def test_predict(predictor, trainset):
 
 @pytest.mark.asyncio
 async def test_as_completed(predictor, trainset):
-    results = [
-        result
-        async for result in predictor.as_completed(trainset[:3], max_concurrent=2)
-    ]
+    results = [result async for result in predictor.as_completed(trainset[:3])]
 
     assert len(results) == 3
     for (input_question, expected_answer), answer in results:
