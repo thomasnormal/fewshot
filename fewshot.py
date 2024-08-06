@@ -13,72 +13,13 @@ import asyncio
 from typing import Any, Annotated
 from termcolor import colored
 import diskcache
-import base64
-from io import BytesIO
-from PIL import Image
 
 from optimizers import DummyOptimizer
-
-
-def image_to_base64(image):
-    # image = image.resize((100, 100))
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-
-Base64Image = Annotated[str, "base64image"]
-
-
-def is_base64_image_field(model: type[BaseModel], field_name: str) -> bool:
-    field = model.model_fields[field_name]
-    return "base64image" in field.metadata
+from templates import format_input
 
 
 T = TypeVar("T", bound=BaseModel)
 U = TypeVar("U", bound=BaseModel)
-
-
-def format_input_simple(pydantic_object: T) -> Generator[dict[str, str], None, None]:
-    # Note: Doesn't support images
-    schema = pydantic_object.model_json_schema()
-    if "description" in schema:
-        yield {"role": "user", "content": schema["description"]}
-    yield {"role": "user", "content": str(pydantic_object)}
-
-
-def format_input(pydantic_object: T) -> Generator[dict[str, str], None, None]:
-
-    schema = pydantic_object.model_json_schema()
-
-    if "description" in schema:
-        yield {"role": "user", "content": schema["description"]}
-
-    properties = schema.get("properties", {})
-    for field_name, field_info in pydantic_object.model_fields.items():
-        if not field_info.exclude:
-            value = getattr(pydantic_object, field_name)
-            schema_info = properties.get(field_name, {})
-            title = schema_info.get("title", field_name.title())
-            desc = schema_info.get("description", "")
-
-            if is_base64_image_field(type(pydantic_object), field_name):
-                yield {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{value}"},
-                        },
-                        {"type": "text", "text": f"{title}: {desc}"},
-                    ],
-                }
-            else:
-                yield {
-                    "role": "user",
-                    "content": f"{title}: {desc}",
-                }
-                yield {"role": "user", "content": str(value)}
 
 
 class Example[T: BaseModel, U: BaseModel]:
@@ -95,10 +36,11 @@ class Predictor[T: BaseModel, U: BaseModel]:
         model: str,
         output_type: Type[U],
         system_message: str = None,
-        format_input=format_input,
+        formatter=format_input,
         max_retries=5,
         optimizer=None,
         cache_dir="./cache",
+        **llm_kwargs,
     ):
         """
         Initialize the Predictor.
@@ -116,7 +58,8 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self.model = model
         self.output_type = output_type
         self.system_message = system_message
-        self.format_input = format_input
+        self.formatter = formatter
+        self.llm_kwargs = llm_kwargs
 
         self.max_retries = max_retries
         self.optimizer = optimizer or DummyOptimizer()
@@ -124,10 +67,10 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self.message_log = []
         self.log = []
 
-        self.cache = diskcache.Cache(cache_dir) or {}
+        self.cache = diskcache.Cache(cache_dir) if cache_dir is not None else {}
 
     def _example_to_messages(self, ex: Example[T, U]):
-        yield from self.format_input(ex.input)
+        yield self.formatter(ex.input)
         yield {"role": "assistant", "content": str(ex.output)}
 
     async def predict(self, input: T) -> U:
@@ -149,10 +92,10 @@ class Predictor[T: BaseModel, U: BaseModel]:
             messages.extend(self._example_to_messages(example))
 
         # Add the current input
-        messages.extend(self.format_input(input))
+        messages.append(self.formatter(input))
 
         # Check if the result is already cached
-        key = (self.model, self.max_retries, self.output_type, messages)
+        key = (self.model, self.max_retries, self.output_type, str(messages))
         if (cached := self.cache.get(key)) is not None:
             output = self.output_type.model_validate_json(cached)
 
@@ -162,9 +105,10 @@ class Predictor[T: BaseModel, U: BaseModel]:
                 max_retries=self.max_retries,
                 response_model=self.output_type,
                 messages=messages,
+                **self.llm_kwargs,
             )
             if self.cache is not None:
-                self.cache.set(key, output.model_dump_json())
+                self.cache[key] = output.model_dump_json()
 
         messages.append({"role": "assistant", "content": str(output)})
         self.message_log.append(messages)

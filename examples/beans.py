@@ -9,7 +9,8 @@ import random
 from typing import Literal, Optional
 
 from optimizers import OptunaFewShot
-from fewshot import Predictor, Example, Base64Image, image_to_base64
+from fewshot import Predictor, Example
+from templates import Base64Image, image_to_base64
 
 
 # Mapping from numeric labels to string labels

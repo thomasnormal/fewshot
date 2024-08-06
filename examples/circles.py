@@ -1,7 +1,7 @@
 import asyncio
 from pydantic import BaseModel, Field
 import instructor
-import openai
+import openai, anthropic
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm
 import random
@@ -11,8 +11,9 @@ import io
 import matplotlib.pyplot as plt
 import base64
 
-from fewshot import Predictor, Example, Base64Image, image_to_base64
+from fewshot import Predictor, Example
 from optimizers import OptunaFewShot, GreedyFewShot
+from templates import format_input_claude, Base64Image, image_to_base64
 
 
 class ImageInput(BaseModel):
@@ -54,7 +55,11 @@ random.shuffle(dataset)
 async def main(client, max_examples: int, optimizer):
     predictor = Predictor(
         client,
-        "gpt-4o-mini",
+        # "gpt-4o-mini",
+        # model="claude-3-5-sonnet",
+        model="claude-3-5-sonnet-20240620",
+        max_tokens=1024,  # Claude needs this for some reason
+        formatter=format_input_claude,
         output_type=CircleCount,
         optimizer=optimizer(max_examples=max_examples),
         system_message="You are an AI trained to count the number of circles in images. Analyze the image and return the count of circles.",
@@ -79,7 +84,8 @@ async def main(client, max_examples: int, optimizer):
 
 if __name__ == "__main__":
     load_dotenv()
-    client = instructor.from_openai(openai.AsyncOpenAI())
+    # client = instructor.from_openai(openai.AsyncOpenAI())
+    client = instructor.from_anthropic(anthropic.AsyncAnthropic())
     N = 6
     xs = range(N)
 
