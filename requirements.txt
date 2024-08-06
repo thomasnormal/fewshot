@@ -1,0 +1,9 @@
+instructor
+pydantic
+openai
+python-dotenv
+asyncio
+contextlib
+tqdm
+termcolor
+diskcache
