@@ -1,3 +1,5 @@
 *.png
 __pycache__/
 cache/
+.DS_Store
+.swp
