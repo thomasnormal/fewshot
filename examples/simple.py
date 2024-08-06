@@ -1,9 +1,10 @@
 import argparse
-from lib import Predictor
 from pydantic import BaseModel
 import asyncio
 import instructor, openai, dotenv
 from dotenv import load_dotenv
+
+from fewshot import Predictor
 
 
 def parse_arguments():
