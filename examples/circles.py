@@ -11,12 +11,14 @@ import io
 import matplotlib.pyplot as plt
 import base64
 
-from lib import Predictor, Example, Base64Image, image_to_base64
+from fewshot import Predictor, Example, Base64Image, image_to_base64
 from optimizers import OptunaFewShot, GreedyFewShot
 
 
 class ImageInput(BaseModel):
-    image: Base64Image = Field(description="Count the number of circles in the image")
+    """Count the number of circles in the image"""
+
+    image: Base64Image
 
 
 class CircleCount(BaseModel):
@@ -59,15 +61,15 @@ async def main(client, max_examples: int, optimizer):
     )
 
     correctness = []
-    with tqdm(total=len(dataset)) as pbar:
-        async for (input_data, actual_count), answer in predictor.as_completed(
-            dataset, max_concurrent=20
-        ):
-            score = float(answer.count == actual_count)
-            predictor.backwards(input_data, CircleCount(count=actual_count), score)
+    with tqdm(
+        predictor.as_completed(dataset, max_concurrent=20), total=len(dataset)
+    ) as pbar:
+        async for (input_data, actual_count), answer in pbar:
+            #l2 = -((actual_count - answer.count) ** 2)
+            score = float(actual_count == answer.count)
+            predictor.backwards(input_data, answer, score)
             correctness.append(score)
             pbar.set_postfix(accuracy=sum(correctness) / len(correctness))
-            pbar.update(1)
 
     final_accuracy = sum(correctness) / len(correctness)
     print(f"Final accuracy: {final_accuracy:.2f}")
