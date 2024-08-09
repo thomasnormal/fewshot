@@ -52,8 +52,6 @@ class GPC:
 
         if self.observations:
             S = torch.tensor(self.observations)
-            print(self.observations)
-            print(S)
             v = torch.tensor(self.values)
             optimizer = optim.Adam(model.parameters(), lr=1e-2)
 
