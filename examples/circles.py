@@ -44,20 +44,9 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-print("Generating dataset...")
-random.seed(32)
-if args.d == "circles":
-    generator = generate_image_with_circles
-    system_message = "Analyze the image and return the count of circles."
-else:
-    generator = generate_image_with_lines
-    system_message = "How many times do the blue and red lines intersect?"
-
-dataset = [generate_image_with_lines() for _ in range(args.n)]
-dataset = [(ImageInput(image=image_to_base64(img)), count) for img, count in dataset]
-
-
-async def main(client, model, max_examples: int, Optimizer):
+async def runner(
+    pbar, client, model, max_examples: int, Optimizer, dataset, system_message
+):
     predictor = Predictor(
         client,
         model=model,
@@ -70,75 +59,107 @@ async def main(client, model, max_examples: int, Optimizer):
     )
 
     correctness = []
-    with tqdm(predictor.as_completed(dataset, concurrent=20)) as pbar:
-        async for t, (input, actual_count), answer in pbar:
-            # l2 = -((actual_count - answer.count) ** 2)
-            score = float(actual_count == answer.count)
-            # It would be useful to be able to provide feedback to the optimizer.
-            # Such as the "actual answer", or some other kind of message.
-            # However, the kind of data needed might depend on the optimized used.
-            # So maybe all of this should be part of `optimizer.step`, like in pytorch?
-            t.backwards(expected=Answer(count=actual_count), score=score)
-            correctness.append(score)
-            pbar.set_postfix(accuracy=sum(correctness) / len(correctness))
+    async for t, (_, actual_count), answer in predictor.as_completed(dataset):
+        # l2 = -((actual_count - answer.count) ** 2)
+        score = float(actual_count == answer.count)
+        # It would be useful to be able to provide feedback to the optimizer.
+        # Such as the "actual answer", or some other kind of message.
+        # However, the kind of data needed might depend on the optimized used.
+        # So maybe all of this should be part of `optimizer.step`, like in pytorch?
+        t.backwards(expected=Answer(count=actual_count), score=score)
+        correctness.append(score)
+        pbar.set_postfix(accuracy=sum(correctness) / len(correctness))
+        pbar.update(1)
 
     final_accuracy = sum(correctness) / len(correctness)
-    print(f"Final accuracy: {final_accuracy:.2f}")
 
     return final_accuracy, predictor
 
 
-load_dotenv()
-if "gpt" in args.model:
-    client = instructor.from_openai(openai.AsyncOpenAI())
-elif "claude" in args.model:
-    client = instructor.from_anthropic(anthropic.AsyncAnthropic())
-else:
-    raise ValueError(f"Unknown model, {args.model}")
+async def main():
+    load_dotenv()
+    if "gpt" in args.model:
+        client = instructor.from_openai(openai.AsyncOpenAI())
+    elif "claude" in args.model:
+        client = instructor.from_anthropic(anthropic.AsyncAnthropic())
+    else:
+        raise ValueError(f"Unknown model, {args.model}")
 
-N = 6
-xs = range(N)
+    print("Generating dataset...")
+    random.seed(32)
+    if args.d == "circles":
+        generator = generate_image_with_circles
+        system_message = "Analyze the image and return the count of circles."
+    else:
+        generator = generate_image_with_lines
+        system_message = "How many times do the blue and red lines intersect?"
 
-fig, axs = plt.subplots(N, N, figsize=(16, 8))
-fig.suptitle(f"FewShot Learning for Images", fontsize=16)
-fig.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
+    dataset = [generator() for _ in range(args.n)]
+    dataset = [
+        (ImageInput(image=image_to_base64(img)), count) for img, count in dataset
+    ]
 
-optimizers = [
-    GPCFewShot,
-    OptunaFewShot,
-    GreedyFewShot,
-    OptimizedRandomSubsets,
-    HardCaseFewShot,
-]
-accuracies = {opt.__name__: [] for opt in optimizers}
+    N = 6
+    xs = range(N)
 
-for i in xs:
-    print(f"Using {i} few-shot examples")
-    for oi, optimizer in enumerate(optimizers):
-        print("Using optimizer:", optimizer.__name__)
-        accuracy, predictor = asyncio.run(main(client, args.model, i, optimizer))
-        accuracies[optimizer.__name__].append(accuracy)
+    fig, axs = plt.subplots(N, N, figsize=(16, 8))
+    fig.suptitle(f"FewShot Learning for Images", fontsize=16)
+    fig.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
 
-        if oi == 0:
-            for j, ex in enumerate(predictor.optimizer.best()):
-                img_data = base64.b64decode(ex.input.image)
-                axs[N - 1 - j, i].imshow(Image.open(io.BytesIO(img_data)))
-                axs[N - 1 - j, i].set_title(f"{ex.output.count}", y=0.98, x=0.9, pad=-8)
-            for j in range(N):
-                axs[j, i].axis("off")
+    optimizers = [
+        GPCFewShot,
+        OptunaFewShot,
+        GreedyFewShot,
+        OptimizedRandomSubsets,
+        HardCaseFewShot,
+    ]
+    accuracies = {opt.__name__: [] for opt in optimizers}
 
-plot_ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])  # [left, bottom, width, height]
-for optimizer in optimizers:
-    plot_ax.plot(
-        xs, accuracies[optimizer.__name__], marker="o", label=optimizer.__name__
-    )
-plot_ax.set_xticks(xs)
-plot_ax.patch.set_alpha(0)
-plot_ax.spines["top"].set_visible(False)
-plot_ax.spines["right"].set_visible(False)
-plot_ax.set_xlabel("Few Shot Max Examples")
-plot_ax.set_ylabel("Accuracy")
-plot_ax.legend()
+    for i in xs:
+        print(f"Using {i} few-shot examples")
+        pbars = [
+            tqdm(total=args.n, desc=optimizer.__name__, position=oi)
+            for oi, optimizer in enumerate(optimizers)
+        ]
+        results = await asyncio.gather(
+            *[
+                runner(pbar, client, args.model, i, optimizer, dataset, system_message)
+                for pbar, optimizer in zip(pbars, optimizers)
+            ]
+        )
+        for oi, (accuracy, predictor) in enumerate(results):
+            accuracies[predictor.optimizer.__class__.__name__].append(accuracy)
 
-plt.savefig("accuracy_vs_max_examples_comparison.png")
-plt.show()
+            if oi == 0:
+                for j, ex in enumerate(predictor.optimizer.best()):
+                    img_data = base64.b64decode(ex.input.image)
+                    axs[N - 1 - j, i].imshow(Image.open(io.BytesIO(img_data)))
+                    axs[N - 1 - j, i].set_title(
+                        f"{ex.output.count}", y=0.98, x=0.9, pad=-8
+                    )
+                for j in range(N):
+                    axs[j, i].axis("off")
+
+        for pbar in pbars:
+            pbar.close()
+        print()
+
+    plot_ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])  # [left, bottom, width, height]
+    for optimizer in optimizers:
+        plot_ax.plot(
+            xs, accuracies[optimizer.__name__], marker="o", label=optimizer.__name__
+        )
+    plot_ax.set_xticks(xs)
+    plot_ax.patch.set_alpha(0)
+    plot_ax.spines["top"].set_visible(False)
+    plot_ax.spines["right"].set_visible(False)
+    plot_ax.set_xlabel("Few Shot Max Examples")
+    plot_ax.set_ylabel("Accuracy")
+    plot_ax.legend()
+
+    plt.savefig("accuracy_vs_max_examples_comparison.png")
+    plt.show()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
