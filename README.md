@@ -15,12 +15,13 @@ A small [DSPy](https://github.com/stanfordnlp/dspy) clone built on [Instructor](
 The framework supports various AI tasks. Here's a basic example for question answering:
 
 ```python
+import instructor
+import openai
 from datasets import load_dataset
 from pydantic import Field, BaseModel
-import instructor, openai
 from tqdm.asyncio import tqdm
 
-from fewshot import Predictor, Example
+from fewshot import Predictor
 from optimizers import OptunaFewShot
 
 # DSPy inspired Pydantic classes for inputs.
@@ -41,12 +42,10 @@ async def main():
     client = instructor.from_openai(openai.AsyncOpenAI())
     pred = Predictor(client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3))
 
-    with tqdm(pred.as_completed(trainset), total=len(trainset)) as pbar:
-        async for (input, expected), answer in pbar:
-            score = int(answer.answer == expected)
-            # PyTorch Inspired backwards function
-            pred.backwards(input, answer, score)
-            pbar.set_postfix(correctness=sum(ex.score for ex in pred.log) / len(pred.log))
+    async for t, (input, expected), answer in pred.as_completed(trainset):
+        score = int(answer.answer == expected)
+        # Update the model, just like PyTorch
+        t.backwards(score=score)
 
     pred.inspect_history()
 ```
