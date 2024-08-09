@@ -66,6 +66,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
         formatter=format_input,
         max_retries=5,
         optimizer=None,
+        verbose=False,
         cache_dir="./cache",
         **llm_kwargs,
     ):
@@ -86,6 +87,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self.system_message = system_message
         self.formatter = formatter
         self.llm_kwargs = llm_kwargs
+        self.verbose = verbose
 
         self.max_retries = max_retries
         self.optimizer = optimizer
@@ -93,13 +95,13 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self.message_log = []
         self.token_count = 0
 
-        self.cache = diskcache.Cache(cache_dir) if cache_dir is not None else {}
+        self.cache = diskcache.Cache(cache_dir) if cache_dir is not None else None
 
     def _example_to_messages(self, ex: Example[T, U]):
         yield self.formatter(ex.input)
-        yield {"role": "assistant", "content": str(ex.output)}
+        yield {"role": "assistant", "content": ex.output.model_dump_json()}
 
-    async def predict(self, input: T) -> Tuple[U, Any]:
+    async def predict(self, input: T | None = None) -> Tuple[U, Any]:
         """
         Make a prediction for the given input.
 
@@ -113,9 +115,12 @@ class Predictor[T: BaseModel, U: BaseModel]:
 
         system_messages = []
         if self.system_message:
-            system_messages.append(self.system_message)
-        system_messages.append({"type": "text", "text": "Input schema:"})
-        system_messages.append({"type": "text", "text": str(input.model_json_schema())})
+            system_messages.append({"type": "text", "text": self.system_message})
+        if input is not None:
+            system_messages.append({"type": "text", "text": "Input schema:"})
+            system_messages.append(
+                {"type": "text", "text": str(input.model_json_schema())}
+            )
         messages.append({"role": "system", "content": system_messages})
 
         # Add examples from the optimizer
@@ -127,14 +132,27 @@ class Predictor[T: BaseModel, U: BaseModel]:
             opt_token = None
 
         # Add the current input
-        messages.append(self.formatter(input))
+        if input is not None:
+            messages.append(self.formatter(input))
+
+        if self.verbose:
+            print("\n--- Messages ---")
+            pprint(messages)
+            print("--- End Messages ---\n")
 
         # Check if the result is already cached
-        key = (self.model, self.max_retries, self.output_type, str(messages))
-        if (cached := self.cache.get(key)) is not None:
-            output = self.output_type.model_validate_json(cached)
+        output = None
+        if self.cache is not None:
+            key = (
+                self.model,
+                self.max_retries,
+                self.output_type.model_json_schema(),
+                str(messages),
+            )
+            if (cached := self.cache.get(key)) is not None:
+                output = self.output_type.model_validate_json(cached)
 
-        else:
+        if output is None:
             output = await self.client.chat.completions.create(
                 model=self.model,
                 max_retries=self.max_retries,
@@ -145,7 +163,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
             if self.cache is not None:
                 self.cache[key] = output.model_dump_json()
 
-        messages.append({"role": "assistant", "content": str(output)})
+        messages.append({"role": "assistant", "content": output.model_dump_json()})
         self.message_log.append(MessageLogItem(input, output, messages))
 
         token = OptimizationToken(self.token_count, self, opt_token)

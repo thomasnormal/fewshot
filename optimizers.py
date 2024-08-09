@@ -6,6 +6,9 @@ from experimental.opt import GPC
 
 
 class Optimizer:
+    def __repr__(self):
+        return self.__class__.__name__
+
     async def step(self):
         # For doing more complex things that require async.
         # For example, asking an LLM for a new prompt.
@@ -89,10 +92,13 @@ class OptunaFewShot(Optimizer):
 
 
 class GPCFewShot(Optimizer):
-    def __init__(self, n_examples: int):
+    def __init__(self, n_examples: int, strategy="random"):
         self.n_examples = n_examples
-        self.model = GPC()
+        self.model = GPC(strategy=strategy)
         self.losses = []
+
+    def __repr__(self):
+        return f"GPCFewShot(strategy={self.model.strategy})"
 
     def suggest(self):
         if not self.losses or self.n_examples == 0:

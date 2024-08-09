@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import base64
+from collections import defaultdict
 from pydantic import BaseModel
 import instructor
 import openai
@@ -37,16 +38,16 @@ class Answer(BaseModel):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("model", type=str, default="gpt-4o-mini")
-parser.add_argument("-n", type=int, default=40, help="Number of examples")
+parser.add_argument("-n", type=int, default=40, help="Number of data points")
 parser.add_argument(
     "-d", choices=["circles", "lines"], default="circles", help="What to count"
 )
+parser.add_argument("-lo", type=int, default=0, help="lowest number of examples")
+parser.add_argument("-hi", type=int, default=5, help="highest number of examples")
 args = parser.parse_args()
 
 
-async def runner(
-    pbar, client, model, max_examples: int, Optimizer, dataset, system_message
-):
+async def runner(pbar, client, model, optimizer, dataset, system_message):
     predictor = Predictor(
         client,
         model=model,
@@ -54,7 +55,7 @@ async def runner(
         max_retries=10,
         formatter=format_input_claude if "claude" in model else format_input,
         output_type=Answer,
-        optimizer=Optimizer(max_examples),
+        optimizer=optimizer,
         system_message=system_message,
     )
 
@@ -99,8 +100,8 @@ async def main():
         (ImageInput(image=image_to_base64(img)), count) for img, count in dataset
     ]
 
-    N = 6
-    xs = range(N)
+    xs = range(args.lo, args.hi + 1)
+    N = args.hi + 1
 
     fig, axs = plt.subplots(N, N, figsize=(16, 8))
     fig.suptitle(f"FewShot Learning for Images", fontsize=16)
@@ -112,23 +113,27 @@ async def main():
         GreedyFewShot,
         OptimizedRandomSubsets,
         HardCaseFewShot,
+        # lambda n: GPCFewShot(n, strategy="random"),
+        # lambda n: GPCFewShot(n, strategy="best"),
+        # lambda n: GPCFewShot(n, strategy="ucb"),
     ]
-    accuracies = {opt.__name__: [] for opt in optimizers}
+    accuracies = defaultdict(list)
 
     for i in xs:
         print(f"Using {i} few-shot examples")
+        opts = [opt(i) for opt in optimizers]
         pbars = [
-            tqdm(total=args.n, desc=optimizer.__name__, position=oi)
-            for oi, optimizer in enumerate(optimizers)
+            tqdm(total=args.n, desc=repr(opt), position=oi)
+            for oi, opt in enumerate(opts)
         ]
         results = await asyncio.gather(
             *[
-                runner(pbar, client, args.model, i, optimizer, dataset, system_message)
-                for pbar, optimizer in zip(pbars, optimizers)
+                runner(pbar, client, args.model, opt(i), dataset, system_message)
+                for pbar, opt in zip(pbars, optimizers)
             ]
         )
         for oi, (accuracy, predictor) in enumerate(results):
-            accuracies[predictor.optimizer.__class__.__name__].append(accuracy)
+            accuracies[oi].append(accuracy)
 
             if oi == 0:
                 for j, ex in enumerate(predictor.optimizer.best()):
@@ -145,10 +150,8 @@ async def main():
         print()
 
     plot_ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])  # [left, bottom, width, height]
-    for optimizer in optimizers:
-        plot_ax.plot(
-            xs, accuracies[optimizer.__name__], marker="o", label=optimizer.__name__
-        )
+    for oi, optimizer in enumerate(optimizers):
+        plot_ax.plot(xs, accuracies[oi], marker="o", label=repr(optimizer(0)))
     plot_ax.set_xticks(xs)
     plot_ax.patch.set_alpha(0)
     plot_ax.spines["top"].set_visible(False)

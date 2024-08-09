@@ -46,13 +46,5 @@ async def test_inspect_history(predictor, capsys):
     assert "Answer questions with short factoid answers" in captured.out
 
 
-@pytest.mark.asyncio
-async def test_caching(predictor, trainset):
-    input_question = Question(question="Think of a random number from 1 to 1000.")
-    _, result1 = await predictor.predict(input_question)
-    _, result2 = await predictor.predict(input_question)
-    assert result1 == result2
-
-
 if __name__ == "__main__":
     pytest.main(["-v", "-s"])

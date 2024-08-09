@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,12 +27,16 @@ class LogisticRegressionModel(nn.Module):
 
 
 class GPC:
-    def __init__(self):
+    def __init__(self, strategy="random"):
         self.observations = []
         self.values = []
         self.model = None
         self.dirty = True
         self.index_values = []
+        self.strategy = strategy
+
+    def __repr__(self):
+        return f"GPC(strategy={self.strategy})"
 
     def _retrain(self, steps=10):
         # N = max(max(obs) for obs in self.observations) + 1
@@ -52,6 +57,7 @@ class GPC:
 
         if self.observations:
             S = torch.tensor(self.observations)
+            # print(f"\n\n {S=}\n {self.observations=}\n\n\n")
             v = torch.tensor(self.values)
             optimizer = optim.Adam(model.parameters(), lr=1e-2)
 
@@ -71,22 +77,35 @@ class GPC:
     def add_index_value(self, value):
         self.index_values.append(value)
 
-    def ask(self, N: int):
+    def ask(self, N: int) -> list[int]:
         if self.model is None or self.dirty:
             self._retrain()
+        # If we don't have enough data, just return a fixed
+        if len(self.index_values) < N:
+            subset = list(range(len(self.index_values)))
+            return (subset * N)[:N]
         # Sample from the normal distribution (model.mu and model.A)
+        if self.strategy == "best":
+            return self.best(N)
         with torch.no_grad():
-            xs = self.model.A @ torch.randn_like(self.model.mu) + self.model.mu
-            # xs *= torch.tensor(self.index_values[: len(xs)])
+            if self.strategy == "random":
+                v = torch.randn_like(self.model.mu) / 10  # Pick some value
+                xs = self.model.A @ v + self.model.mu
+            elif self.strategy == "ucb":
+                # Hacky way to get the UCB
+                v = self.model.mu / torch.linalg.norm(self.model.mu)
+                xs = self.model.A @ v + self.model.mu
             S = torch.argsort(xs, descending=True)[:N]
 
+            # Other ideas:
+            # xs *= torch.tensor(self.index_values[: len(xs)])
             # xs *= 1 / (1 + torch.arange(len(xs)).float()) ** 0.5
             # S = torch.argsort(self.model.mu, descending=True)[:N]
             # ws = torch.sigmoid(xs)
             # S = torch.multinomial(ws, N, replacement=False)
         return S.tolist()
 
-    def best_(self, N: int):
+    def best_(self, N: int) -> list[int]:
         if self.alpha is None or self.dirty:
             self._evaluate_alpha()
         # TODO: This should actually return the subset S, that maximizes
@@ -96,12 +115,11 @@ class GPC:
             S = torch.argsort(self.model.mu, descending=True)[:N]
         return S.tolist()
 
-    def best(self, N: int):
+    def best(self, N: int) -> list[int]:
         if not self.observations:
-            if len(self.index_values) >= N:
-                xs = torch.tensor(self.index_values)
-                return torch.argsort(xs, descending=True)[:N]
-            raise ValueError("No observations have been made yet.")
+            xs = torch.tensor(self.index_values)
+            xs = torch.argsort(xs, descending=True).tolist()
+            return (xs * N)[:N]
         if self.model is None or self.dirty:
             self._retrain()
 
@@ -117,7 +135,7 @@ class GPC:
                     continue
                 temp_S = list(selected) + [i]
                 M = mu[temp_S].sum()
-                V = A[temp_S].sum().pow(2).sum()
+                V = A[temp_S].sum(dim=0).pow(2).sum()
                 value = torch.sigmoid(M / torch.sqrt(len(temp_S) + V))
                 if value > best_value:
                     best_value = value
