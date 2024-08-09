@@ -19,38 +19,27 @@ def is_base64_image_field(model: type[BaseModel], field_name: str) -> bool:
     return "base64image" in field.metadata
 
 
-def format_input_simple( pydantic_object: BaseModel) -> dict[str, str]:
+def format_input_simple(pydantic_object: BaseModel) -> dict[str, str]:
     # Note: Doesn't support images
-    schema = pydantic_object.model_json_schema()
-    content = []
-    if "description" in schema:
-        content.append({"type": "text", "text": schema["description"]})
-    content.append(str(pydantic_object))
-    yield {"role": "user", "content": content}
+    yield {"role": "user", "content": pydantic_object.model_dump_json()}
 
 
 def pydantic_template(
     pydantic_object: BaseModel, img_formatter: Callable[str, dict[str, str]]
 ) -> dict[str, str]:
-
-    schema = pydantic_object.model_json_schema()
-
     content = []
-
-    if "description" in schema:
-        content.append({"type": "text", "text": schema["description"]})
-
+    schema = pydantic_object.model_json_schema()
     properties = schema.get("properties", {})
     for field_name, field_info in pydantic_object.model_fields.items():
         if not field_info.exclude:
             value = getattr(pydantic_object, field_name)
             schema_info = properties.get(field_name, {})
             title = schema_info.get("title", field_name.title())
-            desc = schema_info.get("description", "")
-
-            content.append({"type": "text", "text": f"{title}: {desc}"})
+            content.append({"type": "text", "text": f"{title}:"})
             if is_base64_image_field(type(pydantic_object), field_name):
                 content.append(img_formatter(value))
+            elif hasattr(value, "model_dump_json"):
+                content.append({"type": "text", "text": value.model_dump_json()})
             else:
                 content.append({"type": "text", "text": str(value)})
 
@@ -69,7 +58,7 @@ def format_input(pydantic_object: BaseModel) -> dict[str, str]:
     )
 
 
-def format_input_claude( pydantic_object: BaseModel) -> dict[str, str]:
+def format_input_claude(pydantic_object: BaseModel) -> dict[str, str]:
     return pydantic_template(
         pydantic_object,
         lambda base64: {

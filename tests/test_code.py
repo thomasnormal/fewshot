@@ -7,7 +7,8 @@ import instructor
 import openai
 from dotenv import load_dotenv
 
-from fewshot import Predictor, Example
+from fewshot import Loss, OptimizationToken, Predictor, Example
+from optimizers import GreedyFewShot
 
 
 # Fixtures and tests
@@ -19,7 +20,9 @@ def client():
 
 @pytest.fixture(scope="module")
 def predictor(client):
-    return Predictor(client, "gpt-4o-mini", output_type=Answer)
+    return Predictor(
+        client, "gpt-4o-mini", output_type=Answer, optimizer=GreedyFewShot(3)
+    )
 
 
 # Define the necessary classes and functions
@@ -52,10 +55,10 @@ def evaluate(input: Question, output: Answer):
         with contextlib.redirect_stdout(io.StringIO()):
             exec(code, {})
     except AssertionError:
-        return False
+        return 0
     except Exception as e:
-        return False
-    return True
+        return 0
+    return 1
 
 
 @pytest.fixture(scope="module")
@@ -87,7 +90,8 @@ def test_python_code_validation():
 
 @pytest.mark.asyncio
 async def test_predictor_predict(predictor, sample_question):
-    result = await predictor.predict(sample_question)
+    t, result = await predictor.predict(sample_question)
+    assert isinstance(t, OptimizationToken)
     assert isinstance(result, Answer)
     assert isinstance(result.reasoning, str)
     assert isinstance(result.solution, PythonCode)
@@ -103,47 +107,35 @@ async def test_predictor_as_completed(predictor):
         )
         for i in range(3)
     ]
-    results = [
-        result async for result in predictor.as_completed((q, q) for q in questions)
-    ]
+    results = [(q, a) async for t, q, a in predictor.as_completed(questions)]
     assert len(results) == 3
-    for (question, _), answer in results:
+    for question, answer in results:
         assert isinstance(question, Question)
         assert isinstance(answer, Answer)
 
 
 def test_evaluate_function(sample_question, sample_answer):
-    assert evaluate(sample_question, sample_answer) == True
+    assert evaluate(sample_question, sample_answer)
 
     incorrect_answer = Answer(
         reasoning="This is intentionally wrong.",
         solution=PythonCode(code="def add(a, b):\n    return a - b"),
     )
-    assert evaluate(sample_question, incorrect_answer) == False
-
-
-@pytest.mark.asyncio
-async def test_predictor_backwards(predictor, sample_question, sample_answer):
-    initial_log_length = len(predictor.log)
-    predictor.backwards(sample_question, sample_answer, 1.0)
-    assert len(predictor.log) == initial_log_length + 1
-    assert isinstance(predictor.log[-1], Example)
-    assert predictor.log[-1].input == sample_question
-    assert predictor.log[-1].output == sample_answer
-    assert predictor.log[-1].score == 1.0
+    assert not evaluate(sample_question, incorrect_answer)
 
 
 @pytest.mark.asyncio
 async def test_full_pipeline(predictor, sample_question):
-    result = await predictor.predict(sample_question)
+    t, result = await predictor.predict(sample_question)
     score = evaluate(sample_question, result)
-    predictor.backwards(sample_question, result, score)
+    t.backwards(score=score)
 
-    assert len(predictor.log) > 0
-    assert isinstance(predictor.log[-1], Example)
-    assert predictor.log[-1].input == sample_question
-    assert predictor.log[-1].output == result
-    assert predictor.log[-1].score in [0, 1]
+    losses = predictor.optimizer.losses
+    assert len(losses) > 0
+    assert isinstance(losses[0], Loss)
+    assert losses[0].input == sample_question
+    assert losses[0].output == result
+    assert losses[0].score == score
 
 
 @pytest.mark.asyncio
@@ -160,11 +152,9 @@ async def test_multiple_questions(predictor):
     ]
 
     correctness = []
-    async for (question, _), answer in predictor.as_completed(
-        (q, q) for q in questions
-    ):
+    async for t, question, answer in predictor.as_completed(questions):
         score = evaluate(question, answer)
-        predictor.backwards(question, answer, score)
+        t.backwards(score=score)
         correctness.append(score)
 
     assert len(correctness) == 3

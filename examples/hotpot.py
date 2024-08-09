@@ -10,7 +10,9 @@ from optimizers import OptunaFewShot
 
 class Question(BaseModel):
     """Answer questions with short factoid answers."""
+
     question: str
+
 
 class Answer(BaseModel):
     reasoning: str = Field(description="reasoning for the answer")
@@ -19,17 +21,23 @@ class Answer(BaseModel):
 
 async def main():
     dataset = load_dataset("hotpot_qa", "fullwiki")
-    trainset = [(Question(question=x["question"]), x["answer"]) for x in dataset["train"]]
+    trainset = [
+        (Question(question=x["question"]), x["answer"]) for x in dataset["train"]
+    ]
 
     dotenv.load_dotenv()
     client = instructor.from_openai(openai.AsyncOpenAI())
-    pred = Predictor(client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3))
+    pred = Predictor(
+        client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3)
+    )
 
+    correct = 0
     with tqdm(pred.as_completed(trainset), total=len(trainset)) as pbar:
-        async for (input, expected), answer in pbar:
+        async for t, (input, expected), answer in pbar:
             score = int(answer.answer == expected)
-            pred.backwards(input, answer, score)
-            pbar.set_postfix(correctness=sum(ex.score for ex in pred.log) / len(pred.log))
+            t.backwards(score=score)
+            correct += 1
+            pbar.set_postfix(correctness=correct / (t.index + 1))
 
     pred.inspect_history()
 

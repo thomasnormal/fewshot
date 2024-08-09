@@ -1,78 +1,85 @@
+import argparse
 import asyncio
-from pydantic import BaseModel, Field
+import base64
+from pydantic import BaseModel
 import instructor
-import openai, anthropic
+import openai
+import anthropic
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm
 import random
-from typing import Literal, Optional
-from PIL import Image, ImageDraw
 import io
 import matplotlib.pyplot as plt
-import base64
+import sys
+from PIL import Image
 
-from fewshot import Predictor, Example
-from optimizers import OptunaFewShot, GreedyFewShot
-from templates import format_input_claude, Base64Image, image_to_base64
+from examples.image_datasets import (
+    generate_image_with_lines,
+    generate_image_with_circles,
+)
+from fewshot import Loss, Predictor
+from optimizers import (
+    OptunaFewShot,
+    GreedyFewShot,
+    OptimizedRandomSubsets,
+    HardCaseFewShot,
+    GPCFewShot,
+)
+from templates import format_input_claude, format_input, Base64Image, image_to_base64
 
 
 class ImageInput(BaseModel):
-    """Count the number of circles in the image"""
-
     image: Base64Image
 
 
-class CircleCount(BaseModel):
-    count: int = Field(description="The number of circles in the image")
+class Answer(BaseModel):
+    count: int
 
 
-def generate_image_with_circles(width=300, height=300, max_circles=10):
-    image = Image.new("RGB", (width, height), color="white")
-    draw = ImageDraw.Draw(image)
-    num_circles = random.randint(1, max_circles)
-    for _ in range(num_circles):
-        x = random.randint(20, width - 20)
-        y = random.randint(20, height - 20)
-        radius = random.randint(10, 30)
-        draw.ellipse(
-            [x - radius, y - radius, x + radius, y + radius],
-            fill=tuple(random.randint(0, 255) for _ in range(3)),
-            outline="black",
-        )
-    draw.rectangle([0.5, 0.5, width - 1, height - 1], outline="black")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return image_to_base64(Image.open(buffer)), num_circles
+parser = argparse.ArgumentParser()
+parser.add_argument("model", type=str, default="gpt-4o-mini")
+parser.add_argument("-n", type=int, default=40, help="Number of examples")
+parser.add_argument(
+    "-d", choices=["circles", "lines"], default="circles", help="What to count"
+)
+args = parser.parse_args()
 
 
 print("Generating dataset...")
 random.seed(32)
-dataset = [generate_image_with_circles() for _ in range(400)]
-dataset = [(ImageInput(image=img), count) for img, count in dataset]
-random.shuffle(dataset)
+if args.d == "circles":
+    generator = generate_image_with_circles
+    system_message = "Analyze the image and return the count of circles."
+else:
+    generator = generate_image_with_lines
+    system_message = "How many times do the blue and red lines intersect?"
+
+dataset = [generate_image_with_lines() for _ in range(args.n)]
+dataset = [(ImageInput(image=image_to_base64(img)), count) for img, count in dataset]
 
 
-async def main(client, max_examples: int, optimizer):
+async def main(client, model, max_examples: int, Optimizer):
     predictor = Predictor(
         client,
-        # "gpt-4o-mini",
-        # model="claude-3-5-sonnet",
-        model="claude-3-5-sonnet-20240620",
-        max_tokens=1024,  # Claude needs this for some reason
-        formatter=format_input_claude,
-        output_type=CircleCount,
-        optimizer=optimizer(max_examples=max_examples),
-        system_message="You are an AI trained to count the number of circles in images. Analyze the image and return the count of circles.",
+        model=model,
+        max_tokens=256,  # Claude needs this for some reason
+        max_retries=10,
+        formatter=format_input_claude if "claude" in model else format_input,
+        output_type=Answer,
+        optimizer=Optimizer(max_examples),
+        system_message=system_message,
     )
 
     correctness = []
-    with tqdm(
-        predictor.as_completed(dataset, max_concurrent=20), total=len(dataset)
-    ) as pbar:
-        async for (input_data, actual_count), answer in pbar:
-            #l2 = -((actual_count - answer.count) ** 2)
+    with tqdm(predictor.as_completed(dataset, concurrent=20)) as pbar:
+        async for t, (input, actual_count), answer in pbar:
+            # l2 = -((actual_count - answer.count) ** 2)
             score = float(actual_count == answer.count)
-            predictor.backwards(input_data, answer, score)
+            # It would be useful to be able to provide feedback to the optimizer.
+            # Such as the "actual answer", or some other kind of message.
+            # However, the kind of data needed might depend on the optimized used.
+            # So maybe all of this should be part of `optimizer.step`, like in pytorch?
+            t.backwards(expected=Answer(count=actual_count), score=score)
             correctness.append(score)
             pbar.set_postfix(accuracy=sum(correctness) / len(correctness))
 
@@ -82,50 +89,57 @@ async def main(client, max_examples: int, optimizer):
     return final_accuracy, predictor
 
 
-if __name__ == "__main__":
-    load_dotenv()
-    # client = instructor.from_openai(openai.AsyncOpenAI())
+load_dotenv()
+if "gpt" in args.model:
+    client = instructor.from_openai(openai.AsyncOpenAI())
+elif "claude" in args.model:
     client = instructor.from_anthropic(anthropic.AsyncAnthropic())
-    N = 6
-    xs = range(N)
+else:
+    raise ValueError(f"Unknown model, {args.model}")
 
-    fig, axs = plt.subplots(N, N, figsize=(16, 8))
-    fig.suptitle(
-        f"FewShot Learning for Images: OptunaFewShot vs GreedyFewShot", fontsize=16
+N = 6
+xs = range(N)
+
+fig, axs = plt.subplots(N, N, figsize=(16, 8))
+fig.suptitle(f"FewShot Learning for Images", fontsize=16)
+fig.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
+
+optimizers = [
+    GPCFewShot,
+    OptunaFewShot,
+    GreedyFewShot,
+    OptimizedRandomSubsets,
+    HardCaseFewShot,
+]
+accuracies = {opt.__name__: [] for opt in optimizers}
+
+for i in xs:
+    print(f"Using {i} few-shot examples")
+    for oi, optimizer in enumerate(optimizers):
+        print("Using optimizer:", optimizer.__name__)
+        accuracy, predictor = asyncio.run(main(client, args.model, i, optimizer))
+        accuracies[optimizer.__name__].append(accuracy)
+
+        if oi == 0:
+            for j, ex in enumerate(predictor.optimizer.best()):
+                img_data = base64.b64decode(ex.input.image)
+                axs[N - 1 - j, i].imshow(Image.open(io.BytesIO(img_data)))
+                axs[N - 1 - j, i].set_title(f"{ex.output.count}", y=0.98, x=0.9, pad=-8)
+            for j in range(N):
+                axs[j, i].axis("off")
+
+plot_ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])  # [left, bottom, width, height]
+for optimizer in optimizers:
+    plot_ax.plot(
+        xs, accuracies[optimizer.__name__], marker="o", label=optimizer.__name__
     )
-    fig.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9)
+plot_ax.set_xticks(xs)
+plot_ax.patch.set_alpha(0)
+plot_ax.spines["top"].set_visible(False)
+plot_ax.spines["right"].set_visible(False)
+plot_ax.set_xlabel("Few Shot Max Examples")
+plot_ax.set_ylabel("Accuracy")
+plot_ax.legend()
 
-    accuracies_optuna = []
-    accuracies_greedy = []
-
-    for i in xs:
-        accuracy_optuna, predictor_optuna = asyncio.run(main(client, i, OptunaFewShot))
-        accuracy_greedy, predictor_greedy = asyncio.run(main(client, i, GreedyFewShot))
-        accuracies_optuna.append(accuracy_optuna)
-        accuracies_greedy.append(accuracy_greedy)
-
-        # Plot examples for OptunaFewShot
-        examples = predictor_optuna.optimizer.get_best(predictor_optuna.log)
-        for j in range(len(examples)):
-            img_data = base64.b64decode(examples[j].input.image)
-            axs[N - 1 - j, i].imshow(Image.open(io.BytesIO(img_data)))
-            axs[N - 1 - j, i].set_title(
-                f"{examples[j].output.count}", y=0.98, x=0.9, pad=-8
-            )
-        for j in range(N):
-            axs[j, i].axis("off")
-
-    plot_ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])  # [left, bottom, width, height]
-    plot_ax.plot(xs, accuracies_optuna, marker="o", label="OptunaFewShot")
-    plot_ax.plot(xs, accuracies_greedy, marker="s", label="GreedyFewShot")
-    plot_ax.set_xticks(xs)
-    plot_ax.patch.set_alpha(0)
-    plot_ax.spines["top"].set_visible(False)
-    plot_ax.spines["right"].set_visible(False)
-
-    plot_ax.set_xlabel("Few Shot Max Examples")
-    plot_ax.set_ylabel("Accuracy")
-    plot_ax.legend()
-
-    plt.savefig("accuracy_vs_max_examples_comparison.png")
-    plt.show()
+plt.savefig("accuracy_vs_max_examples_comparison.png")
+plt.show()

@@ -1,79 +1,193 @@
-from collections import defaultdict
 import optuna
+import random
+
+from fewshot import Example
+from experimental.opt import GPC
 
 
 class Optimizer:
-    def step(self):
+    async def step(self):
+        # For doing more complex things that require async.
+        # For example, asking an LLM for a new prompt.
+        # TODO: It would be nice if that could happen in the background, while we keep processing more examples?
+        pass
+
+    def tell(self, token, loss):
         raise NotImplementedError
 
     def suggest(self):
         raise NotImplementedError
 
-
-class OptunaFewShot(Optimizer):
-    def __init__(self, max_examples: int):
-        self.max_examples = max_examples
-        self.ongoing_trials = defaultdict(list)
-        sampler = optuna.samplers.TPESampler(seed=10)
-        self.study = optuna.create_study(direction="maximize", sampler=sampler)
-
-    def _subset_from_trial(self, trial, exs):
-        # subset_size = trial.suggest_int("subset_size", 1, self.max_examples)
-        subset_size = self.max_examples
-        subset = []
-        for i in range(subset_size):
-            index = trial.suggest_int(f"index_{i}", 0, len(exs) - 1)
-            subset.append(exs[index])
-        return subset
-
-    def suggest(self, input, log):
-        if not log or self.max_examples == 0:
-            return []
-        trial = self.study.ask()
-        self.ongoing_trials[str(input)].append(trial)
-        return self._subset_from_trial(trial, log)
-
-    def get_best(self, log):
-        if not log or self.max_examples == 0:
-            return []
-        trial = self.study.best_trial
-        return self._subset_from_trial(trial, log)
-
-    def step(self, input, output, score):
-        try:
-            trial = self.ongoing_trials[str(input)].pop(0)
-        except IndexError:
-            return
-        self.study.tell(trial, score)
+    def best(self):
+        return self.suggest()
 
 
 class GreedyFewShot(Optimizer):
     def __init__(self, max_examples: int):
         self.max_examples = max_examples
+        self.losses = []
 
-    def step(self, input, output, score):
-        pass
+    def tell(self, token, loss):
+        self.losses.append(loss)
 
-    def suggest(self, input, log):
-        def key(ex):
-            # Include the input json in the key for reproducibility
-            return ex.score, ex.input.model_dump_json()
+    def suggest(self):
+        # Include the input in the key for reproducibility
+        self.losses.sort(
+            key=lambda loss: (loss.score, loss.input.model_dump_json()), reverse=True
+        )
+        exs = [
+            Example(
+                loss.input, loss.expected if loss.expected is not None else loss.output
+            )
+            for loss in self.losses[: self.max_examples]
+        ]
+        return exs, None
 
-        # Add the best examples from the log
-        log = [ex for ex in log if ex.score == 1]
-
-        return sorted(log, key=key, reverse=True)[: self.max_examples]
-
-    def get_best(self, log):
-        return self.suggest(None, log)
+    def best(self):
+        return self.suggest()
 
 
-class DummyOptimizer(Optimizer):
-    def step(self, input, output, score):
-        pass
+class OptunaFewShot(Optimizer):
+    def __init__(self, max_examples: int):
+        self.max_examples = max_examples
+        sampler = optuna.samplers.TPESampler(seed=10)
+        self.study = optuna.create_study(direction="maximize", sampler=sampler)
+        self.losses = []
 
-    def suggest(self, input, log):
-        return []
+    def _subset_from_trial(self, trial):
+        subset_size = self.max_examples
+        subset = []
+        for i in range(subset_size):
+            index = trial.suggest_int(f"index_{i}", 0, len(self.losses) - 1)
+            loss = self.losses[index]
+            answer = loss.expected if loss.expected is not None else loss.output
+            subset.append(Example(loss.input, answer))
+        return subset
 
-    def get_best(self, log):
-        return []
+    def suggest(self):
+        if not self.losses or self.max_examples == 0:
+            return [], None
+        trial = self.study.ask()
+        subset = self._subset_from_trial(trial)
+        return subset, trial
+
+    def best(self):
+        if not self.losses or self.max_examples == 0:
+            return []
+        return self._subset_from_trial(self.study.best_trial)
+
+    def tell(self, token, loss):
+        self.losses.append(loss)
+        if token is not None:
+            if loss.score is None:
+                raise ValueError("OptunaFewShot requires a score to be provided.")
+            self.study.tell(token, loss.score)
+
+
+class GPCFewShot(Optimizer):
+    def __init__(self, n_examples: int):
+        self.n_examples = n_examples
+        self.model = GPC()
+        self.losses = []
+
+    def suggest(self):
+        if not self.losses or self.n_examples == 0:
+            return [], None
+        self.model.index_values = [loss.score for loss in self.losses]
+        indices = self.model.ask(self.n_examples)
+        subset = [Example(self.losses[i].input, self.losses[i].output) for i in indices]
+        return subset, indices
+
+    def best(self):
+        if not self.losses or self.n_examples == 0:
+            return []
+        indices = self.model.best(self.n_examples)
+        subset = [Example(self.losses[i].input, self.losses[i].output) for i in indices]
+        return subset
+
+    def tell(self, indices, loss):
+        if indices is None:
+            return
+        self.losses.append(loss)
+        self.model.tell(indices, loss.score)
+
+
+class OptimizedRandomSubsets(Optimizer):
+    def __init__(self, n_examples: int):
+        self.n_examples = n_examples
+        self.n_subsets = 10
+        sampler = optuna.samplers.TPESampler(seed=10)
+        self.study = optuna.create_study(direction="maximize", sampler=sampler)
+        self.subsets = []
+        self.losses = []
+
+    def _examples_from_losses(self):
+        return [
+            Example(
+                loss.input,
+                loss.expected if loss.expected is not None else loss.output,
+            )
+            for loss in self.losses
+            if loss.input is not None
+            and (loss.expected is not None or loss.output is not None)
+        ]
+
+    def suggest(self):
+        if not self.losses or self.n_examples == 0:
+            return [], None
+        exs = self._examples_from_losses()
+        # In the beginning we pick random subsets
+        if len(exs) < self.n_examples + self.n_subsets:
+            return exs[: self.n_examples], None
+        # Once we have enough data, we create the actual subsets to optimize over
+        if not self.subsets:
+            self.subsets = [
+                random.sample(exs, self.n_examples) for _ in range(self.n_subsets)
+            ]
+        trial = self.study.ask()
+        index = trial.suggest_categorical("subset", range(self.n_subsets))
+        return self.subsets[index], trial
+
+    def best(self):
+        if not self.losses or self.n_examples == 0:
+            return []
+        exs = self._examples_from_losses()
+        if not self.subsets:
+            return exs[: self.n_examples]
+        trial = self.study.best_trial
+        index = trial.suggest_categorical("subset", range(self.n_subsets))
+        return self.subsets[index]
+
+    def tell(self, indices, loss):
+        if indices is None:
+            return
+        self.losses.append(loss)
+        self.study.tell(indices, loss.score)
+
+
+class HardCaseFewShot(Optimizer):
+    def __init__(self, max_examples: int):
+        self.max_examples = max_examples
+        self.losses = []
+
+    def tell(self, token, loss):
+        self.losses.append(loss)
+
+    def suggest(self):
+        subset = (
+            [
+                Example(loss.input, loss.expected)
+                for loss in self.losses
+                if loss.score == 0
+            ]
+            + [
+                Example(loss.input, loss.output)
+                for loss in self.losses
+                if loss.score == 1
+            ]
+        )[: self.max_examples]
+        return subset, None
+
+    def best(self):
+        subset, _ = self.suggest()
+        return subset
