@@ -11,6 +11,12 @@ A small [DSPy](https://github.com/stanfordnlp/dspy) clone built on [Instructor](
 - **Asynchronous Processing**: Utilizes `asyncio` for efficient concurrent task handling.
 
 ## Usage
+```bash
+git clone git@github.com:thomasnormal/fewshot.git
+cd fewshot
+pip install -r requirements.txt
+python -m examples.circles
+```
 
 The framework supports various AI tasks. Here's a basic example for question answering:
 
