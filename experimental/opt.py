@@ -34,9 +34,8 @@ class GPC:
         self.index_values = []
 
     def _retrain(self, steps=10):
-        N = max(max(obs) for obs in self.observations) + 1
-        # if N > len(self.values):
-        #     print(f"Observations reference unknown indices: {N} > {len(self.values)}")
+        # N = max(max(obs) for obs in self.observations) + 1
+        N = len(self.index_values)
         model = LogisticRegressionModel(N, N)
 
         # Copy the old model parameters for a warm start
@@ -51,15 +50,18 @@ class GPC:
             for i in range(n, min(N, len(self.index_values))):
                 model.mu[i] = self.index_values[i]
 
-        S = torch.tensor(self.observations)
-        v = torch.tensor(self.values)
-        optimizer = optim.Adam(model.parameters(), lr=1e-2)
+        if self.observations:
+            S = torch.tensor(self.observations)
+            print(self.observations)
+            print(S)
+            v = torch.tensor(self.values)
+            optimizer = optim.Adam(model.parameters(), lr=1e-2)
 
-        for _ in range(steps):
-            Ps = model(S)
-            loss = F.binary_cross_entropy(Ps.view(-1, 1), v.view(-1, 1))
-            loss.backward()
-            optimizer.step()
+            for _ in range(steps):
+                Ps = model(S)
+                loss = F.binary_cross_entropy(Ps.view(-1, 1), v.view(-1, 1))
+                loss.backward()
+                optimizer.step()
 
         self.model = model
 
@@ -68,20 +70,23 @@ class GPC:
         self.values.append(value)
         self.dirty = True
 
+    def add_index_value(self, value):
+        self.index_values.append(value)
+
     def ask(self, N: int):
         if self.model is None or self.dirty:
             self._retrain()
         # Sample from the normal distribution (model.mu and model.A)
         with torch.no_grad():
             xs = self.model.A @ torch.randn_like(self.model.mu) + self.model.mu
-            # xs *= 1 / (1 + torch.arange(len(xs)).float()) ** 0.5
-            xs *= torch.tensor(self.index_values[: len(xs)])
+            # xs *= torch.tensor(self.index_values[: len(xs)])
             S = torch.argsort(xs, descending=True)[:N]
+
+            # xs *= 1 / (1 + torch.arange(len(xs)).float()) ** 0.5
             # S = torch.argsort(self.model.mu, descending=True)[:N]
-            # S = self.best(N)
             # ws = torch.sigmoid(xs)
             # S = torch.multinomial(ws, N, replacement=False)
-        return S
+        return S.tolist()
 
     def best_(self, N: int):
         if self.alpha is None or self.dirty:
@@ -91,11 +96,16 @@ class GPC:
         # So we can take covariance into account
         with torch.no_grad():
             S = torch.argsort(self.model.mu, descending=True)[:N]
-        return S
+        return S.tolist()
 
     def best(self, N: int):
-        # if self.model is None or self.dirty:
-        #     self._retrain()
+        if not self.observations:
+            if len(self.index_values) >= N:
+                xs = torch.tensor(self.index_values)
+                return torch.argsort(xs, descending=True)[:N]
+            raise ValueError("No observations have been made yet.")
+        if self.model is None or self.dirty:
+            self._retrain()
 
         mu = self.model.mu
         A = self.model.A

@@ -10,14 +10,13 @@ from tqdm.asyncio import tqdm
 import random
 import io
 import matplotlib.pyplot as plt
-import sys
 from PIL import Image
 
 from examples.image_datasets import (
     generate_image_with_lines,
     generate_image_with_circles,
 )
-from fewshot import Loss, Predictor
+from fewshot import Predictor
 from optimizers import (
     OptunaFewShot,
     GreedyFewShot,

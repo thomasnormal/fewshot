@@ -52,6 +52,7 @@ class OptunaFewShot(Optimizer):
         self.max_examples = max_examples
         sampler = optuna.samplers.TPESampler(seed=10)
         self.study = optuna.create_study(direction="maximize", sampler=sampler)
+        self.completed_trials = 0
         self.losses = []
 
     def _subset_from_trial(self, trial):
@@ -74,6 +75,8 @@ class OptunaFewShot(Optimizer):
     def best(self):
         if not self.losses or self.max_examples == 0:
             return []
+        if self.completed_trials == 0:
+            return self.suggest()[0]
         return self._subset_from_trial(self.study.best_trial)
 
     def tell(self, token, loss):
@@ -82,6 +85,7 @@ class OptunaFewShot(Optimizer):
             if loss.score is None:
                 raise ValueError("OptunaFewShot requires a score to be provided.")
             self.study.tell(token, loss.score)
+            self.completed_trials += 1
 
 
 class GPCFewShot(Optimizer):
@@ -93,8 +97,8 @@ class GPCFewShot(Optimizer):
     def suggest(self):
         if not self.losses or self.n_examples == 0:
             return [], None
-        self.model.index_values = [loss.score for loss in self.losses]
         indices = self.model.ask(self.n_examples)
+        assert len(indices) == self.n_examples
         subset = [Example(self.losses[i].input, self.losses[i].output) for i in indices]
         return subset, indices
 
@@ -106,10 +110,12 @@ class GPCFewShot(Optimizer):
         return subset
 
     def tell(self, indices, loss):
-        if indices is None:
-            return
         self.losses.append(loss)
-        self.model.tell(indices, loss.score)
+        # The GPC model needs to know about the choices for indices, even if we don't
+        # also have a value for a new example subset.
+        self.model.add_index_value(loss.score)
+        if indices is not None:
+            self.model.tell(indices, loss.score)
 
 
 class OptimizedRandomSubsets(Optimizer):
@@ -158,11 +164,10 @@ class OptimizedRandomSubsets(Optimizer):
         index = trial.suggest_categorical("subset", range(self.n_subsets))
         return self.subsets[index]
 
-    def tell(self, indices, loss):
-        if indices is None:
-            return
+    def tell(self, trial, loss):
         self.losses.append(loss)
-        self.study.tell(indices, loss.score)
+        if trial is not None:
+            self.study.tell(trial, loss.score)
 
 
 class HardCaseFewShot(Optimizer):

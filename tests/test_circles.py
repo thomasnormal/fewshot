@@ -4,10 +4,17 @@ import openai
 from pydantic import BaseModel
 import pytest
 from tqdm.asyncio import tqdm
+
 from examples.image_datasets import generate_image_with_lines
 from fewshot import Predictor
-from optimizers import GreedyFewShot
 from templates import Base64Image, image_to_base64
+from optimizers import (
+    OptunaFewShot,
+    GreedyFewShot,
+    OptimizedRandomSubsets,
+    HardCaseFewShot,
+    GPCFewShot,
+)
 
 
 class ImageInput(BaseModel):
@@ -44,3 +51,19 @@ async def test_train(predictor, dataset):
         async for t, (_, actual_count), answer in pbar:
             score = float(actual_count == answer.count)
             t.backwards(expected=Answer(count=actual_count), score=score)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "optimizer",
+    [OptunaFewShot, GreedyFewShot, OptimizedRandomSubsets, HardCaseFewShot, GPCFewShot],
+)
+async def test_optimizers(predictor, dataset, optimizer):
+    n_examples = 3
+    predictor.optimizer = optimizer(n_examples)
+    async for t, (_, actual_count), answer in predictor.as_completed(dataset):
+        score = float(actual_count == answer.count)
+        t.backwards(expected=Answer(count=actual_count), score=score)
+
+    assert len(predictor.optimizer.losses) == len(dataset)
+    assert len(predictor.optimizer.best()) <= n_examples
