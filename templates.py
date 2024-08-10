@@ -1,8 +1,7 @@
 import base64
 from io import BytesIO
-from PIL import Image
 from pydantic import BaseModel
-from typing import Any, Annotated, Callable
+from typing import Annotated, Callable
 
 Base64Image = Annotated[str, "base64image"]
 

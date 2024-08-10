@@ -100,20 +100,26 @@ class GPCFewShot(Optimizer):
     def __repr__(self):
         return f"GPCFewShot(strategy={self.model.strategy})"
 
+    def _subset(self, indices):
+        subset = []
+        for i in indices:
+            loss = self.losses[i]
+            answer = loss.expected if loss.expected is not None else loss.output
+            subset.append(Example(loss.input, answer))
+        return subset
+
     def suggest(self):
         if not self.losses or self.n_examples == 0:
             return [], None
         indices = self.model.ask(self.n_examples)
         assert len(indices) == self.n_examples
-        subset = [Example(self.losses[i].input, self.losses[i].output) for i in indices]
-        return subset, indices
+        return self._subset(indices), indices
 
     def best(self):
         if not self.losses or self.n_examples == 0:
             return []
         indices = self.model.best(self.n_examples)
-        subset = [Example(self.losses[i].input, self.losses[i].output) for i in indices]
-        return subset
+        return self._subset(indices)
 
     def tell(self, indices, loss):
         self.losses.append(loss)
