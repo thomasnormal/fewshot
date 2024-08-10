@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import base64
 from collections import defaultdict
+import random
 import re
 from typing import Literal
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fewshot import Predictor
-from optimizers import GPCFewShot, OptunaFewShot
+from optimizers import GPCFewShot, OptimizedRandomSubsets, OptunaFewShot
 from templates import format_input_claude, format_input, Base64Image
 
 # Define types for the various types of tasks in the dataset
@@ -36,7 +37,7 @@ class AnswerCount(BaseModel):
 
 
 class AnswerYesNo(BaseModel):
-    yesno: Literal["Yes", "No"]
+    answer: Literal["Yes", "No"]
 
 
 class AnswerRowCol(BaseModel):
@@ -49,31 +50,43 @@ class AnswerLetter(BaseModel):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-model", type=str, default="gpt-4o-mini")
+parser.add_argument("-m", type=str, default="gpt-4o-mini")
 parser.add_argument("-n", type=int, default=40, help="Number of data points")
+parser.add_argument("-t", type=str, default="all", help="Which tasks. Default is all")
 parser.add_argument("-lo", type=int, default=0, help="lowest number of examples")
 parser.add_argument("-hi", type=int, default=5, help="highest number of examples")
+parser.add_argument("-o", choices=["gpc", "optuna", "random"], default="optuna")
 args = parser.parse_args()
 
+Optimizer = {
+    "gpc": GPCFewShot,
+    "optuna": OptunaFewShot,
+    "random": OptimizedRandomSubsets,
+}[args.o]
 
-async def runner(pbar, model, optimizer, dataset, prompt):
-    if "gpt" in args.model:
+
+def make_predictor(model, optimizer, output_type, system_message):
+    if "gpt" in model:
         client = instructor.from_openai(openai.AsyncOpenAI())
-    elif "claude" in args.model:
+    elif "claude" in model:
         client = instructor.from_anthropic(anthropic.AsyncAnthropic())
     else:
-        raise ValueError(f"Unknown model, {args.model}")
+        raise ValueError(f"Unknown model, {model}")
 
-    predictor = Predictor(
+    return Predictor(
         client,
         model=model,
         max_tokens=256,  # Claude needs this for some reason
         max_retries=10,
         formatter=format_input_claude if "claude" in model else format_input,
-        output_type=dataset[0][1].__class__,
+        output_type=output_type,
         optimizer=optimizer,
-        system_message=prompt,
+        system_message=system_message,
     )
+
+
+async def runner(pbar, model, optimizer, dataset, prompt):
+    predictor = make_predictor(model, optimizer, dataset[0][1].__class__, prompt)
 
     correctness = []
     async for t, (_, expected), answer in predictor.as_completed(dataset):
@@ -94,17 +107,20 @@ async def main():
     load_dotenv()
 
     print("Loading dataset...")
+    included = args.t.split(",")
     ds = datasets.load_dataset("XAI/vlmsareblind")["valid"]
     tasks = defaultdict(list)
     prompts = {}
     for d in tqdm(ds.to_list()):
+        if args.t != "all" and d["task"] not in included:
+            continue
         image = base64.b64encode(d["image"]["bytes"]).decode("utf-8")
         # How many single-color paths go from B to D? Answer with a number in curly brackets e.g. {3}
         if d["task"] == "Subway Connections":
             a, b = re.search(r"go from (\w) to (\w)", d["prompt"]).groups()
             answer = AnswerCount(count=int(d["groundtruth"]))
             prompt = "How many single-color paths go from 'start' to 'end'?"
-            question = Question(start=a, end=b, image=image)
+            question = SubwayQuestion(start=a, end=b, image=image)
         # Count total number of squares in the image. Answer with only the number in numerical format in curly brackets e.g. {3}.
         elif d["task"] == "Nested Squares":
             answer = AnswerCount(count=int(d["groundtruth"]))
@@ -117,7 +133,7 @@ async def main():
             question = Question(image=image)
         # Are the two circles touching each other? Answer with Yes/No.
         elif d["task"] == "Touching Circles":
-            answer = AnswerYesNo(yesno=d["groundtruth"])
+            answer = AnswerYesNo(answer=d["groundtruth"])
             prompt = "Are the two circles touching each other?"
             question = Question(image=image)
         # Count the number of rows and columns and answer with numbers in curly brackets. For example, rows={5} columns={6}
@@ -128,9 +144,10 @@ async def main():
             question = Question(image=image)
         # How many circles are in the image? Answer with only the number in numerical format.
         # How many pentagons are in the image? Answer with only the number in numerical format.
+        # Count the pentagons in the image. Answer with a number in curly brackets e.g. {3}.?
         elif d["task"].startswith("Olympic Counting"):
             answer = AnswerCount(count=int(d["groundtruth"]))
-            prompt = d["prompt"].split("?")[0] + "?"
+            prompt = d["prompt"][: d["prompt"].index(" Answer")]
             question = Question(image=image)
         # Which letter is being circled?
         elif d["task"] == "Circled Letter":
@@ -145,19 +162,34 @@ async def main():
 
     for task, dataset in tasks.items():
         print(f"Task: {task}, Length: {len(dataset)}")
+        random.shuffle(dataset)
+
+        input, output = dataset[0]
+        pred = make_predictor(args.m, None, output.__class__, prompts[task])
+        _, res = await pred.predict(input)
+        d = input.dict()
+        del [d["image"]]
+        print(f"Example input: {prompts[task]}, {d}")
+        print(f"Example output: {res}")
+        print(f"Expected output: {output}")
+        print()
 
     accuracies = defaultdict(list)
     for nx in range(args.lo, args.hi + 1):
         print(f"Using {nx} few-shot examples")
-        # opt = OptunaFewShot(nx)
-        opt = GPCFewShot(nx)
         pbars = [
             tqdm(total=min(len(dataset), args.n), desc=task)
             for task, dataset in tasks.items()
         ]
         results = await asyncio.gather(
             *[
-                runner(pbar, args.model, opt, tasks[t][: args.n], prompts[t])
+                runner(
+                    pbar,
+                    args.m,
+                    Optimizer(nx),
+                    tasks[t][: args.n],
+                    prompts[t],
+                )
                 for pbar, t in zip(pbars, tasks)
             ]
         )
@@ -166,8 +198,6 @@ async def main():
         for pbar in pbars:
             pbar.close()
         print()
-
-    print(accuracies)
 
     print_table(accuracies)
     plot_bars(accuracies)
