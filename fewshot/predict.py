@@ -253,7 +253,6 @@ class PredictionWorker:
         ):
             await self._generate_some()
         index, token, ex, res = heapq.heappop(self.output_heap)
-        print("index", index, "cache hits", self.predictor.cache_hits)
         self.completed_count += 1
         return token, ex, res
 
