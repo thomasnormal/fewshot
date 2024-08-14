@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
 
 
-
 def ensure_signature(sig: str | BaseModel) -> BaseModel:
     if sig is None:
         return None
@@ -75,7 +74,10 @@ def _parse_signature(input_str: str) -> Tuple[Type, Field]:
 def _parse_arg_string(string: str, names=None) -> Dict[str, str]:
     args = ast.parse("def f(" + string + "): pass").body[0].args.args
     names = [arg.arg for arg in args]
-    types = [str if arg.annotation is None else _parse_type_node(arg.annotation) for arg in args]
+    types = [
+        str if arg.annotation is None else _parse_type_node(arg.annotation)
+        for arg in args
+    ]
     return zip(names, types)
 
 

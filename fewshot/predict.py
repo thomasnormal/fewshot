@@ -58,7 +58,6 @@ class OptimizationToken:
             )
 
 
-
 class Predictor[T: BaseModel, U: BaseModel]:
     def __init__(
         self,
@@ -188,13 +187,17 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1
     ) -> "PredictionWorker":
         """Process multiple inputs concurrently and yield results as they complete."""
-        return PredictionWorker(self, inputs, concurrent, as_completed=True, epochs=epochs)
+        return PredictionWorker(
+            self, inputs, concurrent, as_completed=True, epochs=epochs
+        )
 
     def gather(
         self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1
     ) -> "PredictionWorker":
         """Process multiple inputs concurrently and yield them in order."""
-        return PredictionWorker(self, inputs, concurrent, as_completed=False, epochs=epochs)
+        return PredictionWorker(
+            self, inputs, concurrent, as_completed=False, epochs=epochs
+        )
 
     def inspect_history(self, n=1):
         """
@@ -228,7 +231,7 @@ class PredictionWorker:
         inputs: list[T | tuple[T, ...]],
         concurrent: int = 10,
         as_completed: bool = False,
-        epochs:int = 1,
+        epochs: int = 1,
     ):
         self.predictor = predictor
         self.inputs = tuple(inputs)

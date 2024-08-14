@@ -1,7 +1,7 @@
 import dotenv
 import instructor
 import openai
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 import pytest
 import string
 import random
@@ -68,21 +68,27 @@ async def test_cache(client):
         ("Who painted the Mona Lisa?", "Leonardo da Vinci"),
         ("What is the square root of 64?", "Eight"),
         ("What is the currency of Japan?", "Yen"),
-        ("How many states are in the USA?", "Fifty")
+        ("How many states are in the USA?", "Fifty"),
     ]
     data = [(Question(text=q), a) for q, a in questions_and_answers]
 
-    # Avoid cache in the first run
-    seed = ''.join(random.choices(string.ascii_lowercase, k=10))
+    # Avoid cache on the first run
+    seed = "".join(random.choices(string.ascii_lowercase, k=10))
 
-    pred = Predictor(client, model, output_type=signature("answer"), verbose=True, system_message=seed)
+    pred = Predictor(
+        client,
+        model,
+        output_type=create_model("Answer", answer=(str, ...)),
+        verbose=True,
+        system_message=seed,
+    )
 
+    # First time we run, there should be no cache hits
     async for t, (input, expected), answer in pred.gather(data, concurrent=3):
-        t.backwards(score=int(expected==answer.answer))
-
+        t.backwards(score=int(expected == answer.answer))
     assert pred.cache_hits == 0
 
+    # Second time we run, everything should be a cache hit
     async for t, (input, expected), answer in pred.gather(data, concurrent=3):
-        t.backwards(score=int(expected==answer.answer))
-
+        t.backwards(score=int(expected == answer.answer))
     assert pred.cache_hits == len(data)

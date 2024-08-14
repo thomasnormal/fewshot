@@ -77,7 +77,7 @@ class OptunaFewShot(Optimizer):
         if not self.losses or self.max_examples == 0:
             return []
         if self.completed_trials == 0:
-            subset, _ =  self.suggest()
+            subset, _ = self.suggest()
             return subset
         return self._subset_from_trial(self.study.best_trial)
 
