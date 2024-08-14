@@ -9,6 +9,7 @@ from typing import Any
 import tenacity
 from termcolor import colored
 import diskcache
+from itertools import chain, repeat
 
 from .templates import format_input
 
@@ -91,12 +92,20 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self.llm_kwargs = llm_kwargs
         self.verbose = verbose
         self.cache = cache
+        self.training = True
+        self.cache_hits = 0
 
         self.max_retries = max_retries
         self.optimizer = optimizer
 
         self.message_log = []
         self.token_count = 0
+
+    def train(self):
+        self.training = True
+
+    def test(self):
+        self.training = False
 
     def _example_to_messages(self, ex: Example[T, U]):
         yield self.formatter(ex.input)
@@ -125,12 +134,16 @@ class Predictor[T: BaseModel, U: BaseModel]:
         messages.append({"role": "system", "content": system_messages})
 
         # Add examples from the optimizer
+        opt_token = None
         if self.optimizer is not None:
-            examples, opt_token = self.optimizer.suggest()
+            if self.training:
+                examples = self.optimizer.best()
+                print("Best examples", self.optimizer)
+            else:
+                examples, opt_token = self.optimizer.suggest()
+            print(examples)
             for example in examples:
                 messages.extend(self._example_to_messages(example))
-        else:
-            opt_token = None
 
         # Add the current input
         if input is not None:
@@ -152,6 +165,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
             )
             if (cached := self.cache.get(key)) is not None:
                 output = self.output_type.model_validate_json(cached)
+                self.cache_hits += 1
 
         if output is None:
             output = await self.client.chat.completions.create(
@@ -173,26 +187,16 @@ class Predictor[T: BaseModel, U: BaseModel]:
         return token, output
 
     def as_completed(
-        self, inputs: list[T | tuple[T, ...]], concurrent=10
+        self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1
     ) -> "PredictionWorker":
         """Process multiple inputs concurrently and yield results as they complete."""
-        return PredictionWorker(self, inputs, concurrent, as_completed=True)
+        return PredictionWorker(self, inputs, concurrent, as_completed=True, epochs=epochs)
 
     def gather(
-        self, inputs: list[T | tuple[T, ...]], concurrent=10
+        self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1
     ) -> "PredictionWorker":
         """Process multiple inputs concurrently and yield them in order."""
-        return PredictionWorker(self, inputs, concurrent, as_completed=False)
-
-    def backwards(self, token: Any, loss: Loss[T, U]):
-        """
-        Update the predictor with feedback on a prediction.
-        """
-
-        # TODO: Right now this doesn't do much. Eventually it'll be more like real backprop.
-        self.log.append(loss)
-        if self.optimizer is not None:
-            self.optimizer.step(token, loss)
+        return PredictionWorker(self, inputs, concurrent, as_completed=False, epochs=epochs)
 
     def inspect_history(self, n=1):
         """
@@ -226,12 +230,14 @@ class PredictionWorker:
         inputs: list[T | tuple[T, ...]],
         concurrent: int = 10,
         as_completed: bool = False,
+        epochs:int = 1,
     ):
         self.predictor = predictor
-        self.inputs = inputs
-        self.iter_inputs = iter(inputs)
+        self.inputs = tuple(inputs)
+        self.iter_inputs = chain.from_iterable(repeat(self.inputs, epochs))
         self.concurrent = concurrent
         self.as_completed = as_completed
+        self.epochs = epochs
 
         self.started_count = 0
         self.completed_count = 0
@@ -239,14 +245,17 @@ class PredictionWorker:
         self.pending = set()
 
     def __len__(self):
-        return len(self.inputs)
+        return len(self.inputs) * self.epochs
 
     async def __anext__(self) -> tuple[OptimizationToken, T, Any]:
+        # Generate some results if none are available, or if we are using gather()
+        # and the next result is not done yet.
         while not self.output_heap or (
             not self.as_completed and self.output_heap[0][0] != self.completed_count
         ):
             await self._generate_some()
-        _, token, ex, res = heapq.heappop(self.output_heap)
+        index, token, ex, res = heapq.heappop(self.output_heap)
+        print("index", index, "cache hits", self.predictor.cache_hits)
         self.completed_count += 1
         return token, ex, res
 

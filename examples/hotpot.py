@@ -32,11 +32,11 @@ async def main():
     )
 
     correct = 0
-    with tqdm(pred.as_completed(trainset), total=len(trainset)) as pbar:
+    with tqdm(pred.as_completed(trainset)) as pbar:
         async for t, (input, expected), answer in pbar:
             score = int(answer.answer == expected)
             t.backwards(score=score)
-            correct += 1
+            correct += score
             pbar.set_postfix(correctness=correct / (t.index + 1))
 
     pred.inspect_history()

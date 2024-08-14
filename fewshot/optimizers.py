@@ -22,7 +22,8 @@ class Optimizer:
         raise NotImplementedError
 
     def best(self):
-        return self.suggest()
+        subset, _ = self.suggest()
+        return subset
 
 
 class GreedyFewShot(Optimizer):
@@ -46,14 +47,11 @@ class GreedyFewShot(Optimizer):
         ]
         return exs, None
 
-    def best(self):
-        return self.suggest()
-
 
 class OptunaFewShot(Optimizer):
-    def __init__(self, max_examples: int):
+    def __init__(self, max_examples: int, seed=10):
         self.max_examples = max_examples
-        sampler = optuna.samplers.TPESampler(seed=10)
+        sampler = optuna.samplers.TPESampler(seed=seed)
         self.study = optuna.create_study(direction="maximize", sampler=sampler)
         self.completed_trials = 0
         self.losses = []
@@ -79,7 +77,8 @@ class OptunaFewShot(Optimizer):
         if not self.losses or self.max_examples == 0:
             return []
         if self.completed_trials == 0:
-            return self.suggest()[0]
+            subset, _ =  self.suggest()
+            return subset
         return self._subset_from_trial(self.study.best_trial)
 
     def tell(self, token, loss):
@@ -204,7 +203,3 @@ class HardCaseFewShot(Optimizer):
             ]
         )[: self.max_examples]
         return subset, None
-
-    def best(self):
-        subset, _ = self.suggest()
-        return subset
