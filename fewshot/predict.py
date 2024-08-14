@@ -138,10 +138,8 @@ class Predictor[T: BaseModel, U: BaseModel]:
         if self.optimizer is not None:
             if self.training:
                 examples = self.optimizer.best()
-                print("Best examples", self.optimizer)
             else:
                 examples, opt_token = self.optimizer.suggest()
-            print(examples)
             for example in examples:
                 messages.extend(self._example_to_messages(example))
 
