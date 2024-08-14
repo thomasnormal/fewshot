@@ -28,7 +28,7 @@ from pydantic import Field, BaseModel
 from tqdm.asyncio import tqdm
 
 from fewshot import Predictor
-from optimizers import OptunaFewShot
+from fewshot.optimizers import OptunaFewShot
 
 # DSPy inspired Pydantic classes for inputs.
 class Question(BaseModel):
@@ -44,16 +44,14 @@ async def main():
     dataset = load_dataset("hotpot_qa", "fullwiki")
     trainset = [(Question(question=x["question"]), x["answer"]) for x in dataset["train"]]
 
-    # Use any Instructor supported LLM
-    client = instructor.from_openai(openai.AsyncOpenAI())
+    client = instructor.from_openai(openai.AsyncOpenAI())  # Use any Instructor supported LLM
     pred = Predictor(client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3))
 
     async for t, (input, expected), answer in pred.as_completed(trainset):
         score = int(answer.answer == expected)
-        # Update the model, just like PyTorch
-        t.backwards(score=score)
+        t.backwards(score=score)  # Update the model, just like PyTorch
 
-    pred.inspect_history()
+    pred.inspect_history()  # Inpsect the messages sent to the LLM
 ```
 
 ## Example of Few Shot tuning on images
