@@ -8,7 +8,7 @@ import openai
 from dotenv import load_dotenv
 
 from fewshot import Loss, OptimizationToken, Predictor, Example
-from optimizers import GreedyFewShot
+from fewshot.optimizers import GreedyFewShot
 
 
 # Fixtures and tests

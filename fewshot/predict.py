@@ -1,3 +1,4 @@
+from collections import defaultdict
 import heapq
 from pprint import pprint
 import instructor
@@ -9,7 +10,7 @@ import tenacity
 from termcolor import colored
 import diskcache
 
-from templates import format_input
+from .templates import format_input
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -56,6 +57,7 @@ class OptimizationToken:
             )
 
 
+
 class Predictor[T: BaseModel, U: BaseModel]:
     def __init__(
         self,
@@ -67,7 +69,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
         max_retries=5,
         optimizer=None,
         verbose=False,
-        cache_dir="./cache",
+        cache=diskcache.Cache("./cache"),
         **llm_kwargs,
     ):
         """
@@ -88,14 +90,13 @@ class Predictor[T: BaseModel, U: BaseModel]:
         self.formatter = formatter
         self.llm_kwargs = llm_kwargs
         self.verbose = verbose
+        self.cache = cache
 
         self.max_retries = max_retries
         self.optimizer = optimizer
 
         self.message_log = []
         self.token_count = 0
-
-        self.cache = diskcache.Cache(cache_dir) if cache_dir is not None else None
 
     def _example_to_messages(self, ex: Example[T, U]):
         yield self.formatter(ex.input)

@@ -7,8 +7,8 @@ from tqdm.asyncio import tqdm
 
 from examples.image_datasets import generate_image_with_lines
 from fewshot import Predictor
-from templates import Base64Image, image_to_base64
-from optimizers import (
+from fewshot.templates import Base64Image, image_to_base64
+from fewshot.optimizers import (
     OptunaFewShot,
     GreedyFewShot,
     OptimizedRandomSubsets,

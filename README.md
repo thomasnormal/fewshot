@@ -14,8 +14,8 @@ A small [DSPy](https://github.com/stanfordnlp/dspy) clone built on [Instructor](
 ```bash
 git clone git@github.com:thomasnormal/fewshot.git
 cd fewshot
-pip install -r requirements.txt
-python -m examples.circles
+pip install -e .
+python examples/simple.py
 ```
 
 The framework supports various AI tasks. Here's a basic example for question answering:

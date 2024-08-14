@@ -5,7 +5,7 @@ import asyncio
 from tqdm.asyncio import tqdm
 
 from fewshot import Predictor, Example
-from optimizers import OptunaFewShot
+from fewshot.optimizers import OptunaFewShot
 
 
 class Question(BaseModel):

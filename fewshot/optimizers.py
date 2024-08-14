@@ -2,7 +2,7 @@ import optuna
 import random
 
 from fewshot import Example
-from experimental.opt import GPC
+from .experimental.opt import GPC
 
 
 class Optimizer:

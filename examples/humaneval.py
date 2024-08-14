@@ -10,7 +10,7 @@ import contextlib
 import io
 
 from fewshot import Predictor
-from optimizers import OptunaFewShot
+from fewshot.optimizers import OptunaFewShot
 
 
 def parse_arguments():
@@ -19,7 +19,7 @@ def parse_arguments():
     parser.add_argument("--n-tasks", type=int, default=0)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--n-train", type=int, default=0)
-    parser.add_argument("--max-retries", type=int, default=1)
+    parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--n-examples", type=int, default=1)
     return parser.parse_args()
 

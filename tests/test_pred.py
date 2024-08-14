@@ -43,7 +43,7 @@ async def test_cache(client):
         model,
         output_type=Answer,
         system_message="You are a random number generator.",
-        cache_dir=None,
+        cache=None,
         verbose=True,
     )
     _, a1 = await pred.predict()

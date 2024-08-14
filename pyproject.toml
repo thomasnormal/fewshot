@@ -1,0 +1,30 @@
+[build-system]
+requires = [
+   "setuptools",
+   "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fewshot"
+version = "0.1"
+dependencies = [
+   "instructor",
+   "pydantic",
+   "openai",
+   "python-dotenv",
+   "asyncio",
+   "tqdm",
+   "termcolor",
+   "diskcache",
+   "optuna",
+   "torch"
+]
+
+[tool.setuptools]
+packages = ["fewshot"]
+
+[tool.ruff]
+line-length = 110
+indent-width = 4
+

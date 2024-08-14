@@ -26,7 +26,7 @@ async def main():
     args = parse_arguments()
     client = instructor.from_openai(openai.AsyncOpenAI())
     pred = Predictor(client, args.model, output_type=Answer)
-    answer = await pred.predict(Question(question="What is the capital of France?"))
+    t, answer = await pred.predict(Question(question="What is the capital of France?"))
     print(answer)
 
 

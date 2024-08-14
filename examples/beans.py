@@ -8,9 +8,9 @@ from tqdm.asyncio import tqdm
 import random
 from typing import Literal
 
-from optimizers import OptunaFewShot
+from fewshot.optimizers import GreedyFewShot
 from fewshot import Loss, Predictor
-from templates import Base64Image, image_to_base64
+from fewshot.templates import Base64Image, image_to_base64
 
 
 # Mapping from numeric labels to string labels
@@ -28,7 +28,7 @@ class BeanClassification(BaseModel):
 
 async def test_beans(predictor, test_subset):
     correctness = []
-    with tqdm(predictor.as_completed(test_subset)) as pbar:
+    with tqdm(predictor.gather(test_subset)) as pbar:
         async for t, (input, expected), answer in pbar:
             score = float(answer.classification == expected.classification)
             t.backwards(score=score)
@@ -44,12 +44,13 @@ async def main(client, max_examples: int):
         client,
         "gpt-4o-mini",
         output_type=BeanClassification,
-        optimizer=(optimizer := OptunaFewShot(max_examples=3)),
+        optimizer=(optimizer := GreedyFewShot(max_examples=3)),
         system_message="You are an AI trained to classify the health status of bean plants.",
     )
 
     print("Loading dataset...")
     dataset = load_dataset("beans", split="train")
+    random.seed(42)
     subset = random.sample(list(dataset), 60)
     pairs = [
         (

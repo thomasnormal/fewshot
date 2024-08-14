@@ -13,7 +13,7 @@ import io
 import matplotlib.pyplot as plt
 from PIL import Image
 
-from examples.image_datasets import (
+from image_datasets import (
     generate_image_with_lines,
     generate_image_with_circles,
 )
@@ -25,7 +25,13 @@ from optimizers import (
     HardCaseFewShot,
     GPCFewShot,
 )
-from templates import format_input_claude, format_input, Base64Image, image_to_base64
+from templates import (
+    format_input_claude,
+    format_input,
+    Base64Image,
+    format_input_simple,
+    image_to_base64,
+)
 
 
 class ImageInput(BaseModel):
@@ -53,7 +59,8 @@ async def runner(pbar, client, model, optimizer, dataset, system_message):
         model=model,
         max_tokens=256,  # Claude needs this for some reason
         max_retries=10,
-        formatter=format_input_claude if "claude" in model else format_input,
+        # formatter=format_input_claude if "claude" in model else format_input,
+        formatter=format_input_simple,
         output_type=Answer,
         optimizer=optimizer,
         system_message=system_message,
