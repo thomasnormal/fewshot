@@ -1,8 +1,14 @@
 import base64
 from io import BytesIO
 import json
-from pydantic import BaseModel
 from typing import Annotated, Any, Callable, get_args, get_origin
+
+from pydantic import BaseModel
+from pydantic_core import core_schema as cs
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler, TypeAdapter
+from pydantic.json_schema import JsonSchemaValue
+from pydantic import BaseModel, ConfigDict
+
 
 Base64Image = Annotated[str, "base64image"]
 
@@ -19,37 +25,40 @@ def is_base64_image_field(model: type[BaseModel], field_name: str) -> bool:
     return "base64image" in field.metadata
 
 
-def is_base64image(obj: Any) -> bool:
-    return (
-        get_origin(type(obj)) is Annotated
-        and get_args(type(obj))[0] is str
-        and "base64image" in get_args(type(obj))
-    )
+def make_title(model) -> str:
+    return f"Title-{model.__name__}"
 
 
-def map_over_anything(obj: Any, func: Callable[[Any], Any]) -> Any:
+# Define the custom ImageType class
+class Image(BaseModel):
+    def base64(self):
+        raise NotImplementedError
+
+
+class PILImage(Image):
+    def __init__(self, image, media_type="image/png"):
+        super().__init__()
+        self._image = image
+        self._media_type = media_type
+
+    def base64(self):
+        buffered = BytesIO()
+        self._image.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+
+# Helper function to recursively apply a function over any type of structure
+def map_images(obj: Any, transform_func: Any) -> Any:
+    if isinstance(obj, Image):
+        return transform_func(obj)
+    if isinstance(obj, dict):
+        return {k: map_images(v, transform_func) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [map_images(elem, transform_func) for elem in obj]
     if isinstance(obj, BaseModel):
-        return map_over_anything(obj.model_dump(), func)
-    elif isinstance(obj, dict):
-        return {k: map_over_anything(v, func) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [map_over_anything(item, func) for item in obj]
-    else:
-        return func(obj)
-
-
-def serialize_with_image_placeholders(model: BaseModel) -> dict[str, Any]:
-    image_map = {}
-
-    def replace_image(obj: Any) -> Any:
-        if is_base64image(obj):
-            image_id = f"[image {len(image_map) + 1}]"
-            image_map[image_id] = obj
-            return image_id
-        return obj
-
-    processed = json.dumps(map_over_anything(model, replace_image))
-    return processed, image_map
+        return {
+            k: map_images(getattr(obj, k), transform_func) for k in obj.model_fields
+        }
 
 
 def format_input_simple(
@@ -58,11 +67,20 @@ def format_input_simple(
     if img_formatter is None:
         img_formatter = gpt_format_image
 
-    processed, image_map = serialize_with_image_placeholders(pydantic_object)
+    image_map = {}
+
+    def replace_image_with_id(obj: Any) -> Any:
+        image_id = f"[image {len(image_map) + 1}]"
+        image_map[image_id] = obj.base64()
+        return image_id
+
+    dict_obj = map_images(pydantic_object, replace_image_with_id)
+    processed = json.dumps(dict_obj)
+
     content = [{"type": "text", "text": processed}]
     for image_id, image in image_map.items():
-        content.append({"type": "text", "text": image_id})
-        content.append({"type": "image", "image": img_formatter(image)})
+        content.append({"type": "text", "text": image_id + ":"})
+        content.append(img_formatter(image))
 
     return {"role": "user", "content": content}
 

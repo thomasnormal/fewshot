@@ -4,7 +4,8 @@ import base64
 from collections import defaultdict
 from pydantic import BaseModel
 import instructor
-import openai
+
+# import openai
 import anthropic
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm
@@ -12,30 +13,26 @@ import random
 import io
 import matplotlib.pyplot as plt
 from PIL import Image
+from langfuse.openai import AsyncOpenAI
 
 from image_datasets import (
     generate_image_with_lines,
     generate_image_with_circles,
 )
 from fewshot import Predictor
-from optimizers import (
+from fewshot.optimizers import (
     OptunaFewShot,
     GreedyFewShot,
     OptimizedRandomSubsets,
     HardCaseFewShot,
     GPCFewShot,
 )
-from templates import (
+from fewshot.templates import (
     format_input_claude,
     format_input,
-    Base64Image,
+    PILImage,
     format_input_simple,
-    image_to_base64,
 )
-
-
-class ImageInput(BaseModel):
-    image: Base64Image
 
 
 class Answer(BaseModel):
@@ -67,13 +64,8 @@ async def runner(pbar, client, model, optimizer, dataset, system_message):
     )
 
     correctness = []
-    async for t, (_, actual_count), answer in predictor.as_completed(dataset):
-        # l2 = -((actual_count - answer.count) ** 2)
+    async for t, (_, actual_count), answer in predictor.gather(dataset):
         score = float(actual_count == answer.count)
-        # It would be useful to be able to provide feedback to the optimizer.
-        # Such as the "actual answer", or some other kind of message.
-        # However, the kind of data needed might depend on the optimized used.
-        # So maybe all of this should be part of `optimizer.step`, like in pytorch?
         t.backwards(expected=Answer(count=actual_count), score=score)
         correctness.append(score)
         pbar.set_postfix(accuracy=sum(correctness) / len(correctness))
@@ -87,7 +79,8 @@ async def runner(pbar, client, model, optimizer, dataset, system_message):
 async def main():
     load_dotenv()
     if "gpt" in args.model:
-        client = instructor.from_openai(openai.AsyncOpenAI())
+        # client = instructor.from_openai(openai.AsyncOpenAI())
+        client = instructor.apatch(AsyncOpenAI())
     elif "claude" in args.model:
         client = instructor.from_anthropic(anthropic.AsyncAnthropic())
     else:
@@ -103,9 +96,7 @@ async def main():
         system_message = "How many times do the blue and red lines intersect?"
 
     dataset = [generator() for _ in range(args.n)]
-    dataset = [
-        (ImageInput(image=image_to_base64(img)), count) for img, count in dataset
-    ]
+    dataset = [(PILImage(img), count) for img, count in dataset]
 
     xs = range(args.lo, args.hi + 1)
     N = args.hi + 1
@@ -144,8 +135,7 @@ async def main():
 
             if oi == 0:
                 for j, ex in enumerate(predictor.optimizer.best()):
-                    img_data = base64.b64decode(ex.input.image)
-                    axs[N - 1 - j, i].imshow(Image.open(io.BytesIO(img_data)))
+                    axs[N - 1 - j, i].imshow(ex.input._image)
                     axs[N - 1 - j, i].set_title(
                         f"{ex.output.count}", y=0.98, x=0.9, pad=-8
                     )
