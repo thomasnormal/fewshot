@@ -11,7 +11,7 @@ from termcolor import colored
 import diskcache
 from itertools import chain, repeat
 
-from .templates import format_input
+from .templates import format_input, format_input_simple
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -65,7 +65,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
         model: str,
         output_type: Type[U],
         system_message: str = None,
-        formatter=format_input,
+        formatter=format_input_simple,
         max_retries=5,
         optimizer=None,
         verbose=False,
@@ -127,9 +127,7 @@ class Predictor[T: BaseModel, U: BaseModel]:
             system_messages.append({"type": "text", "text": self.system_message})
         if input is not None:
             system_messages.append({"type": "text", "text": "Input schema:"})
-            system_messages.append(
-                {"type": "text", "text": str(input.model_json_schema())}
-            )
+            system_messages.append({"type": "text", "text": str(input.model_json_schema())})
         messages.append({"role": "system", "content": system_messages})
 
         # Add examples from the optimizer
@@ -183,21 +181,13 @@ class Predictor[T: BaseModel, U: BaseModel]:
 
         return token, output
 
-    def as_completed(
-        self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1
-    ) -> "PredictionWorker":
+    def as_completed(self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1) -> "PredictionWorker":
         """Process multiple inputs concurrently and yield results as they complete."""
-        return PredictionWorker(
-            self, inputs, concurrent, as_completed=True, epochs=epochs
-        )
+        return PredictionWorker(self, inputs, concurrent, as_completed=True, epochs=epochs)
 
-    def gather(
-        self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1
-    ) -> "PredictionWorker":
+    def gather(self, inputs: list[T | tuple[T, ...]], concurrent=10, epochs=1) -> "PredictionWorker":
         """Process multiple inputs concurrently and yield them in order."""
-        return PredictionWorker(
-            self, inputs, concurrent, as_completed=False, epochs=epochs
-        )
+        return PredictionWorker(self, inputs, concurrent, as_completed=False, epochs=epochs)
 
     def inspect_history(self, n=1):
         """
@@ -290,9 +280,7 @@ class PredictionWorker:
             raise StopAsyncIteration
 
         # Wait for some tasks to complete
-        done, self.pending = await asyncio.wait(
-            self.pending, return_when=asyncio.FIRST_COMPLETED
-        )
+        done, self.pending = await asyncio.wait(self.pending, return_when=asyncio.FIRST_COMPLETED)
 
         # Add them to the (priority) queue for __anext__ to return
         for task in done:

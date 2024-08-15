@@ -84,11 +84,13 @@ async def test_cache(client):
     )
 
     # First time we run, there should be no cache hits
+    acc = 0
     async for t, (input, expected), answer in pred.gather(data, concurrent=3):
-        t.backwards(score=int(expected == answer.answer))
+        acc += int(expected.lower() in answer.answer.lower())
     assert pred.cache_hits == 0
+    assert acc >= 5
 
     # Second time we run, everything should be a cache hit
     async for t, (input, expected), answer in pred.gather(data, concurrent=3):
-        t.backwards(score=int(expected == answer.answer))
+        pass
     assert pred.cache_hits == len(data)

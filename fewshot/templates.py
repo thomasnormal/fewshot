@@ -56,14 +56,11 @@ def map_images(obj: Any, transform_func: Any) -> Any:
     if isinstance(obj, list):
         return [map_images(elem, transform_func) for elem in obj]
     if isinstance(obj, BaseModel):
-        return {
-            k: map_images(getattr(obj, k), transform_func) for k in obj.model_fields
-        }
+        return {k: map_images(getattr(obj, k), transform_func) for k in obj.model_fields}
+    return obj
 
 
-def format_input_simple(
-    pydantic_object: BaseModel, img_formatter=None
-) -> dict[str, Any]:
+def format_input_simple(pydantic_object: BaseModel, img_formatter=None) -> dict[str, Any]:
     if img_formatter is None:
         img_formatter = gpt_format_image
 
@@ -107,9 +104,7 @@ def pydantic_template(
     return {"role": "user", "content": content}
 
 
-def gpt_format_image(
-    base64: str, type: str = "base64", media_type: str = "image/png"
-) -> dict[str, str]:
+def gpt_format_image(base64: str, type: str = "base64", media_type: str = "image/png") -> dict[str, str]:
     return {
         "type": "image_url",
         "image_url": {
@@ -122,9 +117,7 @@ def gpt_format_image(
     }
 
 
-def claude_format_image(
-    base64: str, type: str = "base64", media_type: str = "image/png"
-) -> dict[str, str]:
+def claude_format_image(base64: str, type: str = "base64", media_type: str = "image/png") -> dict[str, str]:
     return {
         "type": "image",
         "source": {

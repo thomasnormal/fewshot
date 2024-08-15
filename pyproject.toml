@@ -18,7 +18,8 @@ dependencies = [
    "termcolor",
    "diskcache",
    "optuna",
-   "torch"
+   "torch",
+   "langfuse"
 ]
 
 [tool.setuptools]

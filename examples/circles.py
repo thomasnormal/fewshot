@@ -1,7 +1,7 @@
 import argparse
 import asyncio
-import base64
 from collections import defaultdict
+import openai
 from pydantic import BaseModel
 import instructor
 
@@ -10,10 +10,8 @@ import anthropic
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm
 import random
-import io
 import matplotlib.pyplot as plt
-from PIL import Image
-from langfuse.openai import AsyncOpenAI
+import langfuse
 
 from image_datasets import (
     generate_image_with_lines,
@@ -42,9 +40,7 @@ class Answer(BaseModel):
 parser = argparse.ArgumentParser()
 parser.add_argument("model", type=str, default="gpt-4o-mini")
 parser.add_argument("-n", type=int, default=40, help="Number of data points")
-parser.add_argument(
-    "-d", choices=["circles", "lines"], default="circles", help="What to count"
-)
+parser.add_argument("-d", choices=["circles", "lines"], default="circles", help="What to count")
 parser.add_argument("-lo", type=int, default=0, help="lowest number of examples")
 parser.add_argument("-hi", type=int, default=5, help="highest number of examples")
 args = parser.parse_args()
@@ -80,7 +76,7 @@ async def main():
     load_dotenv()
     if "gpt" in args.model:
         # client = instructor.from_openai(openai.AsyncOpenAI())
-        client = instructor.apatch(AsyncOpenAI())
+        client = instructor.apatch(langfuse.openai.AsyncOpenAI())
     elif "claude" in args.model:
         client = instructor.from_anthropic(anthropic.AsyncAnthropic())
     else:
@@ -120,10 +116,7 @@ async def main():
     for i in xs:
         print(f"Using {i} few-shot examples")
         opts = [opt(i) for opt in optimizers]
-        pbars = [
-            tqdm(total=args.n, desc=repr(opt), position=oi)
-            for oi, opt in enumerate(opts)
-        ]
+        pbars = [tqdm(total=args.n, desc=repr(opt), position=oi) for oi, opt in enumerate(opts)]
         results = await asyncio.gather(
             *[
                 runner(pbar, client, args.model, opt(i), dataset, system_message)
@@ -136,9 +129,7 @@ async def main():
             if oi == 0:
                 for j, ex in enumerate(predictor.optimizer.best()):
                     axs[N - 1 - j, i].imshow(ex.input._image)
-                    axs[N - 1 - j, i].set_title(
-                        f"{ex.output.count}", y=0.98, x=0.9, pad=-8
-                    )
+                    axs[N - 1 - j, i].set_title(f"{ex.output.count}", y=0.98, x=0.9, pad=-8)
                 for j in range(N):
                     axs[j, i].axis("off")
 
