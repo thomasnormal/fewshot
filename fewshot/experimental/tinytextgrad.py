@@ -5,9 +5,9 @@ import datasets
 import pydantic
 import wikipedia
 import graphviz
+from openai import AsyncOpenAI
 
-# from openai import AsyncOpenAI
-from langfuse.openai import AsyncOpenAI
+# from langfuse.openai import AsyncOpenAI
 
 
 ################################################################################
