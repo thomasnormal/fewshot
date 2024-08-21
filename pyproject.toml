@@ -19,7 +19,8 @@ dependencies = [
    "diskcache",
    "optuna",
    "torch",
-   "langfuse"
+   "langfuse",
+   "datasets",
 ]
 
 [tool.setuptools]
