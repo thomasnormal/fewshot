@@ -1,13 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import dotenv
-import datasets
 import pydantic
-import wikipedia
-import graphviz
-from openai import AsyncOpenAI
-
-# from langfuse.openai import AsyncOpenAI
 
 
 ################################################################################
@@ -19,9 +12,11 @@ class LMConfig:
     """Simple LLM API wrapper."""
 
     def __init__(self, model: str):
-        dotenv.load_dotenv()
         self.model = model
         if model.startswith("gpt"):
+            from openai import AsyncOpenAI
+            # from langfuse.openai import AsyncOpenAI
+
             self.client = AsyncOpenAI()
 
     async def call(self, messages, **kwargs) -> str | dict:
@@ -188,6 +183,7 @@ async def complete(lm: LMConfig, **kwargs: Variable) -> Variable:
 
 async def wikipedia_summary(query: Variable) -> str:
     """This function calls  Get a summary of a Wikipedia page."""
+    import wikipedia
 
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as pool:
@@ -261,6 +257,7 @@ async def equality_loss(lm, answer: Variable, expected: Variable) -> Variable:
 
 def visualize_variable_graph(loss: Variable, filename: str = "variable_graph"):
     """Visualize the computation graph of a Variable using Graphviz."""
+    import graphviz
 
     dot = graphviz.Digraph(comment="Variable Call Graph")
     dot.attr(rankdir="LR", size="12,8")
@@ -295,7 +292,7 @@ def visualize_variable_graph(loss: Variable, filename: str = "variable_graph"):
     traverse(loss)
 
     print("Saving graph to", filename)
-    dot.render(filename, view=False, format="png")
+    dot.render(filename, view=True, format="png")
 
 
 ################################################################################
@@ -322,6 +319,8 @@ class MultihopModel:
 
 
 async def main():
+    import datasets
+
     lm = LMConfig("gpt-4o-2024-08-06")
     model = MultihopModel(hops=2)
     optimizer = Optimizer(model.prompts)
@@ -332,7 +331,7 @@ async def main():
         answer = await model.forward(lm, Variable(x["question"], requires_grad=False))
         loss = await equality_loss(lm, answer, Variable(x["answer"], requires_grad=False))
         await loss.backward(lm)
-        # visualize_variable_graph(loss, f"variable_graph_question_{i}")
+        visualize_variable_graph(loss, f"variable_graph_question_{i}")
         await optimizer.step(lm)
 
         print(f"\n\n---\nQuestion {i}: {x['question']}")
@@ -346,4 +345,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    import dotenv
+
+    dotenv.load_dotenv()
     asyncio.run(main())
