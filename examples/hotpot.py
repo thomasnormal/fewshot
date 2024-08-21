@@ -21,15 +21,11 @@ class Answer(BaseModel):
 
 async def main():
     dataset = load_dataset("hotpot_qa", "fullwiki")
-    trainset = [
-        (Question(question=x["question"]), x["answer"]) for x in dataset["train"]
-    ]
+    trainset = [(Question(question=x["question"]), x["answer"]) for x in dataset["train"]]
 
     dotenv.load_dotenv()
     client = instructor.from_openai(openai.AsyncOpenAI())
-    pred = Predictor(
-        client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3)
-    )
+    pred = Predictor(client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3))
 
     correct = 0
     with tqdm(pred.as_completed(trainset)) as pbar:

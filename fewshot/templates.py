@@ -1,13 +1,9 @@
 import base64
 from io import BytesIO
 import json
-from typing import Annotated, Any, Callable, get_args, get_origin
+from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel
-from pydantic_core import core_schema as cs
-from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler, TypeAdapter
-from pydantic.json_schema import JsonSchemaValue
-from pydantic import BaseModel, ConfigDict
 
 
 Base64Image = Annotated[str, "base64image"]

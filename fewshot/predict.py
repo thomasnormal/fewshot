@@ -1,4 +1,3 @@
-from collections import defaultdict
 import heapq
 from pprint import pprint
 import instructor
