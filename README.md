@@ -51,7 +51,7 @@ async def main():
         score = int(answer.answer == expected)
         t.backwards(score=score)  # Update the model, just like PyTorch
 
-    pred.inspect_history()  # Inpsect the messages sent to the LLM
+    pred.inspect_history()  # Inspect the messages sent to the LLM
 ```
 
 ## Example of Few Shot tuning on images
