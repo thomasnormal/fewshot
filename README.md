@@ -55,4 +55,5 @@ async def main():
 ```
 
 ## Example of Few Shot tuning on images
+Code: [examples/circles.py](https://github.com/thomasnormal/fewshot/blob/main/examples/circles.py)
 ![circles](https://raw.githubusercontent.com/thomasnormal/fewshot/main/static/circles.png)
