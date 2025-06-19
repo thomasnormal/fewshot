@@ -57,3 +57,36 @@ async def main():
 ## Example of Few Shot tuning on images
 Code: [examples/circles.py](https://github.com/thomasnormal/fewshot/blob/main/examples/circles.py)
 ![circles](https://raw.githubusercontent.com/thomasnormal/fewshot/main/static/circles.png)
+
+## TinyTextGrad
+```python
+import fewshot.experimental.tinytextgrad as tg
+lm = tg.LMConfig("gpt-4o-mini")
+await lm.call([{"role": "user", "content": "Who is a good robot?"}])
+# A good robot is one that performs...
+
+prompt = tg.Variable("How many r's are in `word`?")
+word = tg.Variable("strawberry", requires_grad=False)
+answer = await tg.complete(lm, prompt=prompt, word=word)
+answer.value
+# There are 2 r's in 'strawberry'.
+
+expected = tg.Variable("3", requires_grad=False)
+loss = await tg.equality_loss(lm, answer, expected)
+loss.value
+# No, 'answer' is not equal to 'expected' because the count of 'r's in 'strawberry' is 3, not 2.
+
+await loss.backward(lm)
+prompt.feedback
+# ["Consider phrasing your question to be more explicit about the expected outcome. For example, you might ask, 'Can you count the occurrences of the letter r in the given word?'. This subtly encourages a more careful counting method."]
+
+optimizer = tg.Optimizer([prompt])
+await optimizer.step(lm)
+prompt.value
+# Can you count how many times the letter 'r' appears in the word 'word'?
+
+answer = await tg.complete(lm, prompt=prompt, word=word)
+answer.value
+# 3
+```
+See full notebook: https://colab.research.google.com/drive/12AYqI9Ofln6j7qf1s8_GYSjsgEra9orP?usp=sharing#scrollTo=2KmJveu5ROq5
