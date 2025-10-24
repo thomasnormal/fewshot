@@ -4,11 +4,12 @@ A small [DSPy](https://github.com/stanfordnlp/dspy) clone built on [Instructor](
 
 ## Key Features
 
-- **Pydantic Models**: Robust data validation and serialization using Pydantic.
-- **Optimizers**: Includes an Optuna-based few-shot optimizer for hyperparameter tuning.
-- **Vision Models**: Easy to tune few-shot prompts, even with image examples.
-- **Chat Model Templates**: Uses prompt prefilling to and custom templates to make the most of modern LLM APIs.
-- **Asynchronous Processing**: Utilizes `asyncio` for efficient concurrent task handling.
+- **Pydantic Models**: No Signatures, just Pydantic models everywhere.
+- **Optimizers**: Includes _Text Grad_ as well as an Optuna-based few-shot optimizer
+- **Vision Models**: All optimizers work out of the box with image inputs.
+- **Simple Pytorch-like interface**: Just call `loss.backwards()`, you control the control flow!
+- **Builtin Async Parallelism**: Run `predictor.as_completed(trainset)` parallelizes inference and training calls with no worries!
+- **Compositional Structure**: Like DSPy or Pytorch, models can be composed and trained end-to-end.
 
 ## Usage
 ```bash
@@ -42,16 +43,20 @@ class Answer(BaseModel):
 
 async def main():
     dataset = load_dataset("hotpot_qa", "fullwiki")
-    trainset = [(Question(question=x["question"]), x["answer"]) for x in dataset["train"]]
+    trainset = [(
+        Question(question=x["question"]),  # Use any pydantic type for inputs
+        x["answer"]
+    ) for x in dataset["train"]]
 
     client = instructor.from_openai(openai.AsyncOpenAI())  # Use any Instructor supported LLM
-    pred = Predictor(client, "gpt-4o-mini", output_type=Answer, optimizer=OptunaFewShot(3))
+    pred = Predictor(client, "gpt-5-6-7", output_type=Answer, optimizer=OptunaFewShot(3))
 
+    # Train the Predictor model in parallel over hotpot_qa, while optimizing:
     async for t, (input, expected), answer in pred.as_completed(trainset):
         score = int(answer.answer == expected)
-        t.backwards(score=score)  # Update the model, just like PyTorch
+        t.backwards(score=score)  # Backprop the result through all the prompts!
 
-    pred.inspect_history()  # Inspect the messages sent to the LLM
+    pred.inspect_history()  # Built in observability
 ```
 
 ## Example of Few Shot tuning on images
